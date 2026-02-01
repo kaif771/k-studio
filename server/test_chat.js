@@ -5,7 +5,7 @@
 async function testChat() {
     console.log("Testing /api/chat endpoint...");
     try {
-        const response = await fetch('http://localhost:8080/api/chat', {
+        const response = await fetch('http://localhost:5000/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

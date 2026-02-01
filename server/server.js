@@ -11,14 +11,22 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+console.log("Gemini API Key loaded:", !!process.env.GEMINI_API_KEY);
+
+// Health check
+app.get('/api/health', (req, res) => res.json({ status: 'ok', port: 5000 }));
 
 // 1. Logic to Create/Refresh Context Cache
 app.post('/api/cache-codebase', async (req, res) => {
     try {
-        const { projectFiles } = req.body; // Full string of your frontend code
-        const model = "models/gemini-1.5-pro-002"; // Supports 1M+ context
+        const { projectFiles } = req.body;
+        // Use a specific model version that definitely supports caching
+        const model = "gemini-1.5-flash-001";
+
+        console.log("Creating cache for model:", model);
 
         // Create an explicit cache (Valid for 1 hour by default)
         const cache = await genAI.getGenerativeModel({ model }).createCachedContent({
@@ -29,42 +37,73 @@ app.post('/api/cache-codebase', async (req, res) => {
             ttlSeconds: 3600,
         });
 
+        console.log("Cache created successfully:", cache.name);
         res.json({ cacheName: cache.name });
     } catch (error) {
-        res.status(500).json({ error: "Caching failed" });
+        console.error("Caching Error Details:", error);
+        res.status(500).json({ error: "Caching failed", details: error.message });
     }
 });
 
 // 2. The Main Architect Route (Deep Reasoning)
 app.post('/api/architect', async (req, res) => {
     try {
-        const { prompt, projectContext } = req.body;
-        console.log("Architect received prompt:", prompt);
+        const { prompt, projectContext, image, cacheName } = req.body;
+        console.log("Architect received prompt:", prompt, "hasImage:", !!image);
 
-        // Use a model capable of complex reasoning
         const model = genAI.getGenerativeModel({
-            model: "gemini-1.5-pro",
-            systemInstruction: `You are Gemini Architect 3.0, a Full-Stack Autonomous Agent. 
-            Your goal is to "see" the user's frontend and build the matching backend infrastructure.
+            model: "gemini-2.0-flash",
+            systemInstruction: {
+                parts: [{
+                    text: `You are Gemini Architect 3.0, a Full-Stack Autonomous AI Agent with DIRECT file system access.
             
-            You have access to the user's current codebase context.
+            CORE DIRECTIVE:
+            - You are NOT a typical chatbot. You are an AGENT that builds software.
+            - NEVER say "I cannot create files" or "Since I don't have access to your directory".
+            - YOU HAVE FULL ACCESS to create, delete, and modify files in the user's workspace through this interface.
             
-            Analyze the request and the context.
-            Return a JSON object with the following structure:
+            AUTONOMOUS AGENT CAPABILITIES:
+            - Generate COMPLETE, production-ready codebases.
+            - Create ALL necessary files (index.html, styles.css, server.js, models, routes).
+            - Ensure every state variable, API call, and schema is perfectly synced.
+            
+            DEEP REASONING PROTOCOL:
+            Before writing code, "think" through:
+            - DATA RELATIONSHIPS: Design efficient MongoDB schemas.
+            - SECURITY: Implement JWT/RBAC based on UI requirements.
+            - SCALABILITY: Optimize project structure.
+            
+            OUTPUT FORMAT (MANDATORY):
+            You MUST return a JSON object. Do not include any text before or after the JSON.
             {
-                "thought": "A detailed explanation of your reasoning, considering data relationships, security, and scalability.",
-                "plan": "A step-by-step implementation plan.",
-                "code": "The actual code implementation (e.g., Express routes, Mongoose schemas)."
+                "thought": "Internal architectural reasoning.",
+                "plan": "Detailed implementation roadmap including markdown code blocks for the user to see.",
+                "files": [
+                    { "path": "ui/index.html", "content": "..." },
+                    { "path": "server/index.js", "content": "..." }
+                ]
             }
-            Always return valid JSON. Do not wrap in markdown code blocks.`,
-            cachedContent: req.body.cacheName || undefined,
+            Ensure the 'files' array contains EVERYTHING needed to run the app.`
+                }]
+            },
+            cachedContent: cacheName || undefined,
         });
 
+        let parts = [{ text: `CONTEXT:\n${projectContext}\n\nUSER REQUEST: ${prompt}` }];
+
+        if (image) {
+            const base64Data = image.split(',')[1] || image;
+            const mimeType = image.split(';')[0].split(':')[1] || 'image/png';
+            parts.push({
+                inlineData: {
+                    data: base64Data,
+                    mimeType: mimeType
+                }
+            });
+        }
+
         const result = await model.generateContent({
-            contents: [{
-                role: "user",
-                parts: [{ text: `CONTEXT:\n${projectContext}\n\nUSER REQUEST: ${prompt}` }]
-            }],
+            contents: [{ role: "user", parts }],
             generationConfig: {
                 responseMimeType: "application/json"
             }
@@ -76,7 +115,7 @@ app.post('/api/architect', async (req, res) => {
         res.json(JSON.parse(responseText));
     } catch (error) {
         console.error("Architect Error:", error);
-        res.status(500).json({ error: "AI Architect failed to reason." });
+        res.status(500).json({ error: "AI Architect failed to reason.", details: error.message });
     }
 });
 
@@ -84,9 +123,17 @@ app.post('/api/architect', async (req, res) => {
 app.post('/api/chat', async (req, res) => {
     try {
         const { message, history, image, cacheName } = req.body;
+        console.log("Chat request received:", { message, historyLength: history?.length, hasImage: !!image, cacheName });
+
         const model = genAI.getGenerativeModel({
-            model: "gemini-1.5-pro-002",
-            cachedContent: cacheName || undefined
+            model: "gemini-flash-latest",
+            systemInstruction: {
+                parts: [{
+                    text: `You are Gemini Architect Assistant. 
+            When suggesting code, always provide clear file headers like '### filename.ext' followed by code blocks.
+            Your frontend is an autonomous agent that will automatically save these blocks to the user's workspace.`
+                }]
+            }
         });
 
         const chat = model.startChat({
@@ -95,6 +142,7 @@ app.post('/api/chat', async (req, res) => {
 
         let result;
         if (image) {
+            console.log("Processing image in chat...");
             // Remove header "data:image/jpeg;base64," if present
             const base64Data = image.split(',')[1] || image;
             const mimeType = image.split(';')[0].split(':')[1] || 'image/png';
@@ -116,8 +164,12 @@ app.post('/api/chat', async (req, res) => {
         res.json({ reply: response.text() });
     } catch (error) {
         console.error('Chat Error:', error);
-        res.status(500).json({ error: "Chat failed" });
+        res.status(500).json({
+            error: "Chat failed",
+            details: error.message,
+            suggestion: error.message.includes("429") ? "Quota exceeded. Please try again later." : "Check API key and model status."
+        });
     }
 });
 
-app.listen(8080, () => console.log('Backend Online: Port 8080'));
+app.listen(5000, () => console.log('Backend Online: Port 5000'));

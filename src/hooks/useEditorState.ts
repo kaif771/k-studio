@@ -9,6 +9,9 @@ export const useEditorState = () => {
     const [isFileExplorerOpen, setIsFileExplorerOpen] = useState(true);
     const [isAISidebarOpen, setIsAISidebarOpen] = useState(true);
     const [prompt, setPrompt] = useState("");
+    const [image, setImage] = useState<string | null>(null);
+    const [isThinking, setIsThinking] = useState(false);
+    const [pendingFiles, setPendingFiles] = useState<{ path: string, content: string }[]>([]);
 
     const loadFile = useCallback(async (handle: FileSystemFileHandle) => {
         try {
@@ -44,6 +47,12 @@ export const useEditorState = () => {
         isAISidebarOpen,
         setIsAISidebarOpen,
         prompt,
-        setPrompt
+        setPrompt,
+        image,
+        setImage,
+        isThinking,
+        setIsThinking,
+        pendingFiles,
+        setPendingFiles
     };
 };

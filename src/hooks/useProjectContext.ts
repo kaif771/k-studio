@@ -9,7 +9,7 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
     const createCache = useCallback(async (projectContext: string) => {
         setIsCaching(true);
         try {
-            const response = await fetch('http://localhost:8080/api/cache-codebase', {
+            const response = await fetch('http://localhost:5000/api/cache-codebase', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ projectFiles: projectContext })
@@ -31,21 +31,30 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
         setIsScanning(true);
         let fullContext = "";
 
-        const processHandle = async (handle: FileSystemDirectoryHandle | FileSystemFileHandle, path: string = "") => {
+        const processHandle = async (handle: FileSystemDirectoryHandle | FileSystemFileHandle, currentPath: string = "") => {
+            const name = handle.name;
+            const fullPath = currentPath ? `${currentPath}/${name}` : name;
+
             if (handle.kind === 'file') {
-                const file = await (handle as FileSystemFileHandle).getFile();
-                const name = handle.name;
-                // Filter relevant files
-                if (name.match(/\.(tsx|ts|js|jsx|css|json|html|md)$/) && !path.includes('node_modules') && !path.includes('dist') && !name.startsWith('.')) {
-                    const text = await file.text();
-                    fullContext += `\n// File: ${path}/${name}\n${text}\n`;
+                if (name.match(/\.(tsx|ts|js|jsx|css|json|html|md)$/) &&
+                    !fullPath.includes('node_modules') &&
+                    !fullPath.includes('dist') &&
+                    !name.startsWith('.')) {
+
+                    try {
+                        const file = await (handle as FileSystemFileHandle).getFile();
+                        const text = await file.text();
+                        fullContext += `\n// File: ${fullPath}\n${text}\n`;
+                    } catch (e) {
+                        console.error(`Failed to read file ${fullPath}:`, e);
+                    }
                 }
             } else if (handle.kind === 'directory') {
-                if (handle.name === 'node_modules' || handle.name === '.git' || handle.name === 'dist') return;
+                if (name === 'node_modules' || name === '.git' || name === 'dist') return;
 
-                // @ts-expect-error - Async iterator for directory handle is standard but might miss types
+                // @ts-expect-error - Async iterator standard
                 for await (const entry of (handle as FileSystemDirectoryHandle).values()) {
-                    await processHandle(entry, `${path}/${handle.name}`);
+                    await processHandle(entry, fullPath);
                 }
             }
         };

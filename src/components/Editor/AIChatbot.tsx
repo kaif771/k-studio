@@ -11,9 +11,17 @@ interface Message {
 
 interface AIChatbotProps {
     cacheName: string | null;
+    createFileAtPath: (path: string, content: string) => Promise<any>;
+    pendingFiles: { path: string, content: string }[];
+    setPendingFiles: (files: { path: string, content: string }[] | ((prev: { path: string, content: string }[]) => { path: string, content: string }[])) => void;
 }
 
-export const AIChatbot: React.FC<AIChatbotProps> = ({ cacheName }) => {
+export const AIChatbot: React.FC<AIChatbotProps> = ({
+    cacheName,
+    createFileAtPath,
+    pendingFiles,
+    setPendingFiles
+}) => {
     const [isOpen, setIsOpen] = useState(true);
     const [isExpanded, setIsExpanded] = useState(false);
     const [input, setInput] = useState('');
@@ -76,7 +84,7 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({ cacheName }) => {
                 }));
 
             // REAL API CALL: Update to your server's endpoint
-            const response = await fetch('http://localhost:8080/api/chat', {
+            const response = await fetch('http://localhost:5000/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -87,9 +95,19 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({ cacheName }) => {
                 }),
             });
 
-            if (!response.ok) throw new Error('Network response was not ok');
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.details || 'Network response was not ok');
+            }
 
             const data = await response.json();
+
+            // Extract and queue files for manual confirmation (User Activation)
+            const extractedFiles = extractFilesFromMarkdown(data.reply);
+            if (extractedFiles.length > 0) {
+                console.log("Chat suggests files, queueing for confirmation:", extractedFiles);
+                setPendingFiles(prev => [...prev, ...extractedFiles]);
+            }
 
             const aiMessage: Message = {
                 id: Date.now().toString(),
@@ -99,9 +117,47 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({ cacheName }) => {
             };
 
             setMessages(prev => [...prev, aiMessage]);
-        } catch (error) {
+        } catch (error: any) {
             console.error("Chat Error:", error);
+            const errorMessage: Message = {
+                id: Date.now().toString(),
+                role: 'ai',
+                content: `Error: ${error.message || 'Something went wrong.'}`,
+                timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMessage]);
         }
+    };
+
+    const handleApplyFiles = async () => {
+        if (pendingFiles.length === 0) return;
+
+        try {
+            console.log("User activated: Applying files...", pendingFiles);
+            for (const file of pendingFiles) {
+                await createFileAtPath(file.path, file.content);
+            }
+            setPendingFiles([]); // Clear after success
+            alert("Files created successfully!");
+        } catch (error) {
+            console.error("Failed to apply files:", error);
+            alert("Security Error: Try refreshing or re-selecting your project folder.");
+        }
+    };
+
+    const extractFilesFromMarkdown = (text: string) => {
+        const files: { path: string, content: string }[] = [];
+        // Catch ### filename.ext, **filename.ext**, File: filename.ext, etc.
+        const fileHeaderRegex = /(?:###|##|#|File:?|Filename:?|\*\*)\s*(?:\d+\.?\s*)?[`*]?([a-zA-Z0-9._\-\/ ]+\.[a-zA-Z0-9]+)[`*]?[\s\S]*?\n\s*```(?:[a-z]*)\n([\s\S]*?)```/gi;
+
+        let match;
+        while ((match = fileHeaderRegex.exec(text)) !== null) {
+            files.push({
+                path: match[1].trim(),
+                content: match[2].trim()
+            });
+        }
+        return files;
     };
 
     if (!isOpen) {
@@ -184,6 +240,19 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({ cacheName }) => {
                         <span className="text-[10px] text-white/50">Image attached</span>
                         <button onClick={() => setSelectedImage(null)} className="text-white/30 hover:text-white">
                             <X size={12} />
+                        </button>
+                    </div>
+                )}
+                {pendingFiles.length > 0 && (
+                    <div className="flex items-center justify-between mb-4 p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl animate-pulse">
+                        <span className="text-[11px] text-cyan-400 font-bold uppercase tracking-wider">
+                            AI suggested {pendingFiles.length} file changes
+                        </span>
+                        <button
+                            onClick={handleApplyFiles}
+                            className="px-4 py-2 bg-cyan-500 text-black text-[11px] font-black rounded-lg hover:bg-cyan-400 transition-colors shadow-[0_0_15px_rgba(34,211,238,0.3)]"
+                        >
+                            APPLY CHANGES
                         </button>
                     </div>
                 )}

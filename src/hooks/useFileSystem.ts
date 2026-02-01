@@ -89,5 +89,26 @@ export const useFileSystem = (directoryHandle: FileSystemDirectoryHandle | null)
         }
     };
 
-    return { fileTree, toggleFolder, saveFile, createFile, refreshTree };
+    const createFileAtPath = async (path: string, content: string): Promise<FileSystemFileHandle | null> => {
+        if (!directoryHandle) return null;
+        try {
+            const parts = path.split('/').filter(p => p);
+            const fileName = parts.pop()!;
+            let currentDir = directoryHandle;
+
+            for (const part of parts) {
+                currentDir = await currentDir.getDirectoryHandle(part, { create: true });
+            }
+
+            const fileHandle = await currentDir.getFileHandle(fileName, { create: true });
+            await saveFile(fileHandle, content);
+            await refreshTree();
+            return fileHandle;
+        } catch (err) {
+            console.error(`Error creating file at path ${path}:`, err);
+            return null;
+        }
+    };
+
+    return { fileTree, toggleFolder, saveFile, createFile, createFileAtPath, refreshTree };
 };

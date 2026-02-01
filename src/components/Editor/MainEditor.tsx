@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback } from 'react';
 import { useFileSystem } from '../../hooks/useFileSystem';
 import { useEditorState } from '../../hooks/useEditorState';
 import { useProjectContext } from '../../hooks/useProjectContext';
@@ -27,7 +27,8 @@ export const MainEditor: React.FC<MainEditorProps> = ({
         fileTree,
         toggleFolder,
         saveFile,
-        createFile
+        createFile,
+        createFileAtPath
     } = useFileSystem(directoryHandle);
 
     const {
@@ -46,11 +47,32 @@ export const MainEditor: React.FC<MainEditorProps> = ({
         isAISidebarOpen,
         setIsAISidebarOpen,
         prompt,
-        setPrompt
+        setPrompt,
+        image,
+        setImage,
+        isThinking,
+        setIsThinking,
+        pendingFiles,
+        setPendingFiles
     } = useEditorState();
 
     const { context, scanProject, isScanning, cacheName } = useProjectContext(directoryHandle);
-    const [isThinking, setIsThinking] = useState(false);
+
+    // AI Response Parser Fallback
+    const extractFilesFromMarkdown = (text: string) => {
+        const files: { path: string, content: string }[] = [];
+        // Catch ### filename.ext, **filename.ext**, File: filename.ext, etc.
+        const fileHeaderRegex = /(?:###|##|#|File:?|Filename:?|\*\*)\s*(?:\d+\.?\s*)?[`*]?([a-zA-Z0-9._\-\/ ]+\.[a-zA-Z0-9]+)[`*]?[\s\S]*?\n\s*```(?:[a-z]*)\n([\s\S]*?)```/gi;
+
+        let match;
+        while ((match = fileHeaderRegex.exec(text)) !== null) {
+            files.push({
+                path: match[1].trim(),
+                content: match[2].trim()
+            });
+        }
+        return files;
+    };
 
     // Scan project when directoryHandle is available
     React.useEffect(() => {
@@ -99,43 +121,51 @@ export const MainEditor: React.FC<MainEditorProps> = ({
     };
 
     const handleArchitectRequest = async () => {
-        if (!prompt.trim()) return;
+        if (!prompt.trim() && !image) return;
         setIsThinking(true);
-        setIsCommandOpen(false); // Close palette to show progress
+        setIsCommandOpen(false);
 
         try {
-            // Ideally move this to a dedicated API service hook
-            const response = await fetch('http://localhost:8080/api/architect', {
+            const response = await fetch('http://localhost:5000/api/architect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     prompt,
                     projectContext: context,
-                    cacheName // Pass the cache name
+                    image,
+                    cacheName
                 })
             });
 
+            if (!response.ok) throw new Error("API request failed");
+
             const data = await response.json();
-            // TODO: Display the plan/code in a meaningful way. 
-            // For now, we'll append it to a new file "ArchitectPlan.md" or show in Chat.
+            console.log("Architect Response:", data);
 
-            console.log("Architect Plan:", data);
+            let thought = data.thought || "Processing...";
+            let plan = data.plan || "";
+            let files = data.files || [];
 
-            // Create a plan file
-            const planFileName = `Architect_Plan_${Date.now()}.md`;
-            const planHandle = await createFile(planFileName);
-            if (planHandle) {
-                // Formatting the output
-                const content = `# Architect's Thought Process\n${data.thought}\n\n# Implementation Plan\n${data.plan}\n\n# Generated Code\n\`\`\`\n${data.code}\n\`\`\``;
-
-                const writable = await planHandle.createWritable();
-                await writable.write(content);
-                await writable.close();
-
-                setActiveFile(planFileName);
-                setActiveFileHandle(planHandle);
-                setCode(content);
+            // If files is empty but plan has code blocks, try to extract them
+            if (files.length === 0 && plan) {
+                console.log("No files in JSON, attempting markdown extraction...");
+                files = extractFilesFromMarkdown(plan);
             }
+
+            // Create the architect's thought/plan file first
+            const planFileName = `Architect_Plan_${Date.now()}.md`;
+            const planContent = `# Architect's Thought Process\n${thought}\n\n# Implementation Plan\n${plan}`;
+            await createFileAtPath(planFileName, planContent);
+
+            // Queue generated files for manual confirmation (User Activation)
+            if (files && Array.isArray(files)) {
+                console.log(`Queueing ${files.length} files for manual confirmation...`);
+                setPendingFiles(prev => [...prev, ...files]);
+            }
+
+            // Set the plan as the active file for review
+            setActiveFile(planFileName);
+            setCode(planContent);
 
         } catch (error) {
             console.error("Architect failed:", error);
@@ -143,6 +173,21 @@ export const MainEditor: React.FC<MainEditorProps> = ({
         } finally {
             setIsThinking(false);
             setPrompt("");
+            setImage(null);
+        }
+    };
+
+    const handleApplyPendingFiles = async () => {
+        if (pendingFiles.length === 0) return;
+        try {
+            for (const file of pendingFiles) {
+                await createFileAtPath(file.path, file.content);
+            }
+            setPendingFiles([]);
+            alert("Architect's files applied successfully!");
+        } catch (error) {
+            console.error("Failed to apply architect files:", error);
+            alert("Security Error: Please interact with the page or re-select the project folder.");
         }
     };
 
@@ -175,7 +220,24 @@ export const MainEditor: React.FC<MainEditorProps> = ({
                         code={code}
                         setCode={setCode}
                     />
-                    <AIChatbot cacheName={cacheName} />
+                    <AIChatbot
+                        cacheName={cacheName}
+                        createFileAtPath={createFileAtPath}
+                        pendingFiles={pendingFiles}
+                        setPendingFiles={setPendingFiles}
+                    />
+
+                    {/* Pending Files Notification for Architect */}
+                    {pendingFiles.length > 0 && !isAISidebarOpen && (
+                        <div className="absolute bottom-4 right-4 z-50 animate-bounce">
+                            <button
+                                onClick={handleApplyPendingFiles}
+                                className="bg-cyan-500 text-black px-4 py-2 rounded-full font-black text-xs shadow-2xl"
+                            >
+                                APPLY {pendingFiles.length} CHANGES
+                            </button>
+                        </div>
+                    )}
 
                     {/* Loading Overlay */}
                     {isThinking && (
@@ -203,6 +265,8 @@ export const MainEditor: React.FC<MainEditorProps> = ({
                     setIsOpen={setIsCommandOpen}
                     prompt={prompt}
                     setPrompt={setPrompt}
+                    image={image}
+                    setImage={setImage}
                     onSubmit={handleArchitectRequest}
                     isScanning={isScanning}
                 />
