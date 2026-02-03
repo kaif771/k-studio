@@ -56,7 +56,18 @@ export const MainEditor: React.FC<MainEditorProps> = ({
         setPendingFiles
     } = useEditorState();
 
-    const { context, scanProject, isScanning, cacheName } = useProjectContext(directoryHandle);
+    const {
+        context,
+        scanProject,
+        isScanning,
+        cacheName,
+        previewUrl,
+        isLaunching,
+        projectType,
+        framework,
+        projectStatus,
+        stopProject
+    } = useProjectContext(directoryHandle);
 
     // AI Response Parser Fallback
     const extractFilesFromMarkdown = (text: string) => {
@@ -79,7 +90,16 @@ export const MainEditor: React.FC<MainEditorProps> = ({
         if (directoryHandle) {
             scanProject();
         }
-    }, [directoryHandle, scanProject]);
+        // Cleanup on project switch/unmount
+        return () => {
+            stopProject();
+        };
+    }, [directoryHandle, scanProject, stopProject]);
+
+    const handleBack = useCallback(async () => {
+        await stopProject();
+        onBack();
+    }, [stopProject, onBack]);
 
     const handleSave = useCallback(async () => {
         if (activeFileHandle) {
@@ -177,6 +197,30 @@ export const MainEditor: React.FC<MainEditorProps> = ({
         }
     };
 
+    // Automatically open preview when an autonomous URL is detected
+    // AND sync path for static projects
+    const [finalUrl, setFinalUrl] = React.useState<string | null>(null);
+
+    React.useEffect(() => {
+        console.log("🔄 MainEditor: Preview effect triggered:", { previewUrl, projectType, activeFile, isLaunching });
+        if (previewUrl) {
+            setIsPreviewOpen(true);
+            console.log("✅ MainEditor: Opening preview panel");
+
+            if (projectType === 'static' && activeFile && activeFile.endsWith('.html')) {
+                const newUrl = `${previewUrl}/${activeFile}`;
+                setFinalUrl(newUrl);
+                console.log("📄 MainEditor: Static project - Final URL:", newUrl);
+            } else {
+                setFinalUrl(previewUrl);
+                console.log("🌐 MainEditor: Dev server - Final URL:", previewUrl);
+            }
+        } else {
+            console.log("⏳ MainEditor: No previewUrl, clearing finalUrl");
+            setFinalUrl(null);
+        }
+    }, [previewUrl, projectType, activeFile, setIsPreviewOpen]);
+
     const handleApplyPendingFiles = async () => {
         if (pendingFiles.length === 0) return;
         try {
@@ -195,7 +239,7 @@ export const MainEditor: React.FC<MainEditorProps> = ({
         <div className="h-screen w-full flex flex-col bg-[#000000] text-slate-300 overflow-hidden font-sans">
             <EditorHeader
                 selectedProject={selectedProject}
-                onBack={onBack}
+                onBack={handleBack}
                 isFileExplorerOpen={isFileExplorerOpen}
                 onToggleFileExplorer={() => setIsFileExplorerOpen(!isFileExplorerOpen)}
                 isAISidebarOpen={isAISidebarOpen}
@@ -204,7 +248,7 @@ export const MainEditor: React.FC<MainEditorProps> = ({
 
             <main className="flex flex-1 overflow-hidden relative">
                 {isFileExplorerOpen && (
-                    <div className="absolute inset-y-0 left-0 z-40 lg:relative lg:inset-auto">
+                    <div className="absolute inset-y-0 left-0 z-40 w-full sm:w-auto lg:relative lg:inset-auto">
                         <FileExplorer
                             activeFile={activeFile}
                             fileTree={fileTree}
@@ -249,13 +293,19 @@ export const MainEditor: React.FC<MainEditorProps> = ({
 
                     {isPreviewOpen && (
                         <div className="absolute inset-0 z-50 bg-black">
-                            <PreviewPanel onClose={() => setIsPreviewOpen(false)} />
+                            <PreviewPanel
+                                onClose={() => setIsPreviewOpen(false)}
+                                externalUrl={finalUrl}
+                                isLaunching={isLaunching}
+                                framework={framework}
+                                status={projectStatus}
+                            />
                         </div>
                     )}
                 </div>
 
                 {isAISidebarOpen && (
-                    <div className="absolute inset-y-0 right-0 z-40 lg:relative lg:inset-auto bg-[#0a0a0a] shadow-2xl lg:shadow-none">
+                    <div className="absolute inset-y-0 right-0 z-40 w-full sm:w-auto lg:relative lg:inset-auto bg-[#0a0a0a] shadow-2xl lg:shadow-none">
                         <AISidebar />
                     </div>
                 )}
@@ -278,4 +328,4 @@ export const MainEditor: React.FC<MainEditorProps> = ({
             />
         </div>
     );
-};// Context hook usage will be added in MainEditor.tsx
+};

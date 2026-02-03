@@ -5,6 +5,76 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
     const [isScanning, setIsScanning] = useState(false);
     const [cacheName, setCacheName] = useState<string | null>(null);
     const [isCaching, setIsCaching] = useState(false);
+    const [projectType, setProjectType] = useState<string | null>(null);
+    const [framework, setFramework] = useState<string | null>(null);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [isLaunching, setIsLaunching] = useState(false);
+    const [projectStatus, setProjectStatus] = useState<string | null>(null);
+
+    const detectAndRunProject = useCallback(async (fileNames: string[]) => {
+        if (!directoryHandle) return;
+        setIsLaunching(true);
+        console.log("🚀 Starting autonomous runner for:", directoryHandle.name);
+        try {
+            // 1. Detect project type
+            const detectRes = await fetch('http://localhost:5000/api/detect-project', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    folderName: directoryHandle.name,
+                    files: fileNames
+                })
+            });
+            const projectInfo = await detectRes.json();
+            setProjectType(projectInfo.type);
+            setFramework(projectInfo.framework);
+            console.log("📦 Detected project:", projectInfo.type, "Framework:", projectInfo.framework, "Port:", projectInfo.port);
+
+            // 2. Run the project
+            const runRes = await fetch('http://localhost:5000/api/run-project', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectName: directoryHandle.name,
+                    projectType: projectInfo.type,
+                    port: projectInfo.port
+                })
+            });
+            const runInfo = await runRes.json();
+            console.log("🎯 Run response:", runInfo);
+            setProjectStatus(runInfo.status);
+
+            if (runInfo.url) {
+                setPreviewUrl(runInfo.url);
+                console.log("✅ Autonomous runner started project at:", runInfo.url);
+            } else {
+                console.error("❌ No URL returned from run-project", runInfo.message);
+            }
+        } catch (error) {
+            console.error("❌ Autonomous Project Runner Failed:", error);
+        } finally {
+            console.log("🏁 Setting isLaunching to false");
+            setIsLaunching(false);
+        }
+    }, [directoryHandle]);
+
+    const stopProject = useCallback(async () => {
+        if (!directoryHandle) return;
+        try {
+            await fetch('http://localhost:5000/api/stop-project', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ projectName: directoryHandle.name })
+            });
+            console.log("Autonomous runner stopped project:", directoryHandle.name);
+            setPreviewUrl(null);
+            setProjectType(null);
+            setFramework(null);
+            setProjectStatus(null);
+        } catch (error) {
+            console.error("Failed to stop project:", error);
+        }
+    }, [directoryHandle]);
 
     const createCache = useCallback(async (projectContext: string) => {
         setIsCaching(true);
@@ -27,15 +97,28 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
     }, []);
 
     const scanProject = useCallback(async () => {
-        if (!directoryHandle) return;
+        if (!directoryHandle) {
+            console.log("📂 scanProject: No directory handle available.");
+            return;
+        }
         setIsScanning(true);
+        // Reset preview state for new project
+        setPreviewUrl(null);
+        setProjectType(null);
+        setFramework(null);
+        setProjectStatus(null);
+
+        console.log("📂 scanProject: Starting scan for:", directoryHandle.name);
+
         let fullContext = "";
+        const fileNames: string[] = [];
 
         const processHandle = async (handle: FileSystemDirectoryHandle | FileSystemFileHandle, currentPath: string = "") => {
             const name = handle.name;
             const fullPath = currentPath ? `${currentPath}/${name}` : name;
 
             if (handle.kind === 'file') {
+                fileNames.push(name);
                 if (name.match(/\.(tsx|ts|js|jsx|css|json|html|md)$/) &&
                     !fullPath.includes('node_modules') &&
                     !fullPath.includes('dist') &&
@@ -51,7 +134,6 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
                 }
             } else if (handle.kind === 'directory') {
                 if (name === 'node_modules' || name === '.git' || name === 'dist') return;
-
                 // @ts-expect-error - Async iterator standard
                 for await (const entry of (handle as FileSystemDirectoryHandle).values()) {
                     await processHandle(entry, fullPath);
@@ -61,10 +143,13 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
 
         try {
             await processHandle(directoryHandle);
+            console.log(`📂 scanProject: Scan complete. Found ${fileNames.length} files.`);
             setContext(fullContext);
-            console.log("Project context scanned:", fullContext.length, "characters");
 
-            // Automatically create cache after scanning
+            // Trigger autonomous detection and running
+            console.log("📂 scanProject: Triggering detectAndRunProject...");
+            detectAndRunProject(fileNames);
+
             if (fullContext) {
                 createCache(fullContext);
             }
@@ -73,7 +158,19 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
         } finally {
             setIsScanning(false);
         }
-    }, [directoryHandle, createCache]);
+    }, [directoryHandle, createCache, detectAndRunProject]);
 
-    return { context, scanProject, isScanning, cacheName, isCaching };
+    return {
+        context,
+        scanProject,
+        isScanning,
+        cacheName,
+        isCaching,
+        projectType,
+        framework,
+        projectStatus,
+        previewUrl,
+        isLaunching,
+        stopProject
+    };
 };

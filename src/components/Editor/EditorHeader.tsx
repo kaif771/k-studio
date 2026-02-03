@@ -22,9 +22,11 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
         <div className="flex items-center gap-3">
             <button
                 onClick={onBack}
-                className="p-1.5 bg-white/5 rounded-lg hover:bg-white/10 transition-all border border-white/5 shrink-0"
+                className="flex items-center gap-2 p-1.5 bg-white/5 rounded-lg hover:bg-white/10 transition-all border border-white/5 shrink-0 px-3"
+                title="Open another folder"
             >
                 <BrainCircuit size={18} className="text-white" />
+                <span className="text-[10px] font-bold text-white/60 uppercase tracking-wider hidden sm:inline">Switch Project</span>
             </button>
             <div className="flex flex-col min-w-0">
                 <h1 className="text-[10px] sm:text-[11px] font-black tracking-[0.2em] sm:tracking-[0.3em] text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-pink-500 leading-none uppercase truncate drop-shadow-[0_0_8px_rgba(34,211,238,0.3)]">

@@ -48,8 +48,11 @@ export const WelcomePage: React.FC<WelcomePageProps> = ({ onProjectSelect }) => 
             } else {
                 alert('Your browser does not support the File System Access API.');
             }
-        } catch (err) {
-            console.error('Folder selection cancelled:', err);
+        } catch (err: any) {
+            console.error('Folder selection error:', err);
+            if (err.name !== 'AbortError') {
+                alert(`Error selecting folder: ${err.message || 'Unknown error'}. Please try again.`);
+            }
         }
     };
 
@@ -98,8 +101,8 @@ export const WelcomePage: React.FC<WelcomePageProps> = ({ onProjectSelect }) => 
                 </div>
 
                 {/* Recent Projects */}
-                <div className="w-full max-w-3xl px-12">
-                    <div className="flex justify-between items-center mb-10 px-2">
+                <div className="w-full max-w-3xl px-4 sm:px-8 md:px-12">
+                    <div className="flex justify-between items-center mb-6 sm:mb-10 px-2">
                         <h3 className="text-[11px] font-black text-white/30 uppercase tracking-[0.25em]">Recent projects</h3>
                         <span className="text-[11px] font-black text-white/30 hover:text-white cursor-pointer transition-colors uppercase tracking-[0.25em]">View all ({recentProjects.length})</span>
                     </div>

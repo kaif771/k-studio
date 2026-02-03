@@ -75,8 +75,8 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ activeFile, fileTree
     };
 
     return (
-        <div className="w-64 bg-[#080808] border-r border-white/5 h-full py-6 flex flex-col">
-            <div className="px-6 mb-6 flex items-center justify-between text-[11px] font-black text-white/40 uppercase tracking-[0.2em] group">
+        <div className="w-full sm:w-64 md:w-72 lg:w-80 bg-[#080808] border-r border-white/5 h-full py-4 sm:py-6 flex flex-col">
+            <div className="px-4 sm:px-6 mb-4 sm:mb-6 flex items-center justify-between text-[10px] sm:text-[11px] font-black text-white/40 uppercase tracking-[0.15em] sm:tracking-[0.2em] group">
                 <div className="flex items-center gap-2">
                     <ChevronDown size={14} className="text-white/20" /> Workspace
                 </div>
