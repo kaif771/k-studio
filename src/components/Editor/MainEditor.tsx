@@ -73,7 +73,7 @@ export const MainEditor: React.FC<MainEditorProps> = ({
     const extractFilesFromMarkdown = (text: string) => {
         const files: { path: string, content: string }[] = [];
         // Catch ### filename.ext, **filename.ext**, File: filename.ext, etc.
-        const fileHeaderRegex = /(?:###|##|#|File:?|Filename:?|\*\*)\s*(?:\d+\.?\s*)?[`*]?([a-zA-Z0-9._\-\/ ]+\.[a-zA-Z0-9]+)[`*]?[\s\S]*?\n\s*```(?:[a-z]*)\n([\s\S]*?)```/gi;
+    const fileHeaderRegex = /(?:###|##|#|File:?|Filename:?|\*\*)\s*(?:\d+\.?\s*)?[`*]?([a-zA-Z0-9._\-/ ]+\.[a-zA-Z0-9]+)[`*]?[\s\S]*?\n\s*```(?:[a-z]*)\n([\s\S]*?)```/gi;
 
         let match;
         while ((match = fileHeaderRegex.exec(text)) !== null) {
@@ -162,8 +162,8 @@ export const MainEditor: React.FC<MainEditorProps> = ({
             const data = await response.json();
             console.log("Architect Response:", data);
 
-            let thought = data.thought || "Processing...";
-            let plan = data.plan || "";
+            const thought = data.thought || "Processing...";
+            const plan = data.plan || "";
             let files = data.files || [];
 
             // If files is empty but plan has code blocks, try to extract them
@@ -207,19 +207,26 @@ export const MainEditor: React.FC<MainEditorProps> = ({
             setIsPreviewOpen(true);
             console.log("✅ MainEditor: Opening preview panel");
 
-            if (projectType === 'static' && activeFile && activeFile.endsWith('.html')) {
-                const newUrl = `${previewUrl}/${activeFile}`;
+            // Handle framework-specific preview behavior.
+            // For React-based dev servers (Vite, Next.js, CRA, Remix, Node dev servers)
+            // the root preview URL is typically correct and supports client-side routing.
+            const spaFrameworks = new Set(['vite', 'nextjs', 'react', 'remix', 'nodejs']);
+            if (spaFrameworks.has(framework || '') || projectType !== 'static') {
+                // Dev servers for these frameworks usually serve the app at the root.
+                setFinalUrl(previewUrl.replace(/\/$/, ''));
+                console.log("🌐 MainEditor: Dev/SPA project - Final URL:", previewUrl);
+            } else {
+                // Static projects (vanilla static sites) may need an explicit index.html entry.
+                const entry = (activeFile && activeFile.endsWith('.html')) ? activeFile : 'index.html';
+                const newUrl = `${previewUrl.replace(/\/$/, '')}/${entry}`;
                 setFinalUrl(newUrl);
                 console.log("📄 MainEditor: Static project - Final URL:", newUrl);
-            } else {
-                setFinalUrl(previewUrl);
-                console.log("🌐 MainEditor: Dev server - Final URL:", previewUrl);
             }
         } else {
             console.log("⏳ MainEditor: No previewUrl, clearing finalUrl");
             setFinalUrl(null);
         }
-    }, [previewUrl, projectType, activeFile, setIsPreviewOpen]);
+    }, [previewUrl, projectType, activeFile, setIsPreviewOpen, framework, isLaunching]);
 
     const handleApplyPendingFiles = async () => {
         if (pendingFiles.length === 0) return;
@@ -306,7 +313,7 @@ export const MainEditor: React.FC<MainEditorProps> = ({
 
                 {isAISidebarOpen && (
                     <div className="absolute inset-y-0 right-0 z-40 w-full sm:w-auto lg:relative lg:inset-auto bg-[#0a0a0a] shadow-2xl lg:shadow-none">
-                        <AISidebar />
+                        <AISidebar projectContext={context} createFileAtPath={createFileAtPath} />
                     </div>
                 )}
 

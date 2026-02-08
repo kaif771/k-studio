@@ -41,10 +41,13 @@ export const WelcomePage: React.FC<WelcomePageProps> = ({ onProjectSelect }) => 
 
             if ('showDirectoryPicker' in window) {
 
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const directoryHandle = await (window as any).showDirectoryPicker();
-                saveProject(directoryHandle.name);
-                onProjectSelect(directoryHandle.name, directoryHandle);
+                // Narrow window type safely instead of using `any`.
+                const w = window as unknown as { showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle> };
+                if (w.showDirectoryPicker) {
+                    const directoryHandle = await w.showDirectoryPicker();
+                    saveProject(directoryHandle.name);
+                    onProjectSelect(directoryHandle.name, directoryHandle);
+                }
             } else {
                 alert('Your browser does not support the File System Access API.');
             }

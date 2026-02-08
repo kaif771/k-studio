@@ -11,7 +11,9 @@ interface PreviewPanelProps {
 
 export const PreviewPanel: React.FC<PreviewPanelProps> = ({ onClose, externalUrl, isLaunching, framework, status }) => {
     const [viewMode, setViewMode] = useState<'mobile' | 'tablet' | 'desktop'>('desktop');
-    const [url, setUrl] = useState('http://127.0.0.1:3000');
+    // `url` may be null when no preview is available. Avoid passing an empty string
+    // to iframe src (causes browser warning). Use null to represent "no URL".
+    const [url, setUrl] = useState<string | null>(null);
     const [key, setKey] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
     const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -21,16 +23,21 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ onClose, externalUrl
         console.log("🖼️ PreviewPanel received:", { externalUrl, isLaunching, framework, status });
         if (externalUrl) {
             if (externalUrl !== url) {
-                setUrl(externalUrl);
-                setKey(prev => prev + 1);
-                setIsLoading(true);
-                console.log("🔄 PreviewPanel updating URL to:", externalUrl);
+                // Avoid synchronous setState in effects — defer to next macrotask
+                setTimeout(() => {
+                    setUrl(externalUrl);
+                    setKey(prev => prev + 1);
+                    setIsLoading(true);
+                    console.log("🔄 PreviewPanel updating URL to:", externalUrl);
+                }, 0);
             }
         } else if (status !== 'needs_install') {
-            // Clear the URL if externalUrl is null/empty and not showing install warning
-            if (url !== '') {
-                setUrl('');
-                setIsLoading(false);
+            // Use null to explicitly represent "no preview URL". Avoid empty string.
+            if (url !== null) {
+                setTimeout(() => {
+                    setUrl(null);
+                    setIsLoading(false);
+                }, 0);
             }
         }
     }, [externalUrl, url, isLaunching, framework, status]);
@@ -47,6 +54,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ onClose, externalUrl
     };
 
     const handlePopOut = () => {
+        if (!url) return;
         window.open(url, '_blank');
     };
 
@@ -110,7 +118,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ onClose, externalUrl
                         <span className="text-[9px] sm:text-[10px] text-white/20 font-mono tracking-tight hidden sm:inline">URL</span>
                         <input
                             type="text"
-                            value={url}
+                            value={url ?? ''}
                             onChange={handleUrlChange}
                             onKeyDown={handleKeyDown}
                             className="bg-transparent border-none outline-none text-[9px] sm:text-[10px] text-white/60 w-full md:w-48 font-mono"
@@ -187,17 +195,23 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({ onClose, externalUrl
                             </p>
                         </div>
                     )}
-                    <iframe
-                        key={key}
-                        ref={iframeRef}
-                        src={url}
-                        onLoad={() => {
-                            console.log('✅ Iframe loaded successfully:', url);
-                            setIsLoading(false);
-                        }}
-                        className="w-full h-full border-none bg-white"
-                        title="Frontend Preview"
-                    />
+                    {url ? (
+                        <iframe
+                            key={key}
+                            ref={iframeRef}
+                            src={url}
+                            onLoad={() => {
+                                console.log('✅ Iframe loaded successfully:', url);
+                                setIsLoading(false);
+                            }}
+                            className="w-full h-full border-none bg-white"
+                            title="Frontend Preview"
+                        />
+                    ) : (
+                        <div className="w-full h-full flex items-center justify-center text-center p-6">
+                            <div className="text-slate-500">No preview available. Start the project to see a live preview.</div>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

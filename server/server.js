@@ -13,6 +13,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
+// Global error handlers to surface uncaught exceptions and unhandled rejections
+process.on('uncaughtException', (err) => {
+    console.error('❌ Uncaught Exception:', err && err.stack ? err.stack : err);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('❌ Unhandled Rejection:', reason);
+});
+
 // Backend Port Allocation Management
 const activeProcesses = new Map();
 const activeStaticServers = new Map(); // ProjectName -> { server, port }
@@ -86,7 +94,27 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+let genAI = null;
+try {
+    // SDK initialization may throw synchronously if keys are invalid or missing.
+    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+} catch (initErr) {
+    console.error('⚠️ Failed to initialize GoogleGenerativeAI SDK:', initErr && initErr.message ? initErr.message : initErr);
+    genAI = null;
+}
+
+// Local deterministic fallback generators for dev/test when SDK is unavailable or quota limited
+function fallbackGenerateSchema(projectContext) {
+    const header = '# Suggested MongoDB Schema\n\n';
+    const users = `## users\n\n- _id: ObjectId\n- email: string (unique)\n- passwordHash: string\n- roles: [string]\n- createdAt: ISODate\n- updatedAt: ISODate\n\nExample:\n\n{\n  \"email\": \"user@example.com\",\n  \"passwordHash\": \"$2b$...\",\n  \"roles\": [\"user\"]\n}\n\n`;
+    const projects = `## projects\n\n- _id: ObjectId\n- ownerId: ObjectId (ref users)\n- name: string\n- files: [{ path: string, content: string }]\n- createdAt: ISODate\n\n`;
+    const indexes = `## Recommended Indexes\n\n- users: { email: 1 } (unique)\n- projects: { ownerId: 1 }\n\n`;
+    return header + users + projects + indexes + '\n// Context summary:\n' + (projectContext ? projectContext.slice(0, 1000) : '(none)');
+}
+
+function fallbackGenerateAuth(projectContext) {
+    return `# Auth scaffold (fallback)\n\nThis is a deterministic fallback auth scaffold for development and testing. Replace with a production-ready implementation when ready.\n\n## Overview\n- Express routes: /auth/register, /auth/login, /auth/me\n- Storage: MongoDB users collection with password hashes (bcrypt)\n- Session: JWT stored in Authorization header (Bearer)\n\n## Example code snippets\n\n// register (pseudo)\nPOST /auth/register\n{ email, password } -> create user with passwordHash\n\n// login (pseudo)\nPOST /auth/login\n{ email, password } -> verify password, return JWT\n\n// middleware (pseudo)\nfunction authMiddleware(req, res, next) {\n  const token = req.headers.authorization?.split(' ')[1];\n  // verify JWT and attach userId to req.user\n}\n\n// Notes:\n- Use bcrypt for password hashing\n- Use a short-lived access token with refresh tokens if needed\n\n// Context summary:\n${projectContext ? projectContext.slice(0, 1000) : '(none)'}\n`;
+}
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', port: 5000 }));
@@ -95,6 +123,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', port: 5000 }));
 
 app.post('/api/cache-codebase', async (req, res) => {
     try {
+        if (!genAI) return res.status(503).json({ cacheName: null, message: 'Generative AI SDK not initialized' });
         const { projectFiles } = req.body;
 
         if (!projectFiles || projectFiles.trim().length === 0) {
@@ -127,6 +156,7 @@ app.post('/api/cache-codebase', async (req, res) => {
 
 app.post('/api/architect', async (req, res) => {
     try {
+        if (!genAI) return res.status(503).json({ error: 'Generative AI SDK not initialized' });
         const { prompt, projectContext, image, cacheName } = req.body;
         const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash", cachedContent: cacheName || undefined });
         let parts = [{ text: `CONTEXT:\n${projectContext}\n\nUSER REQUEST: ${prompt}` }];
@@ -143,6 +173,7 @@ app.post('/api/architect', async (req, res) => {
 
 app.post('/api/chat', async (req, res) => {
     try {
+        if (!genAI) return res.status(503).json({ error: 'Generative AI SDK not initialized' });
         const { message, history } = req.body;
         const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
         const chat = model.startChat({ history: history || [] });
@@ -153,10 +184,110 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 
+// Generate MongoDB schema using Gemini (returns markdown string)
+app.post('/api/generate-mongo-schema', async (req, res) => {
+    const { projectContext } = req.body || {};
+    // Use fallback generator when SDK isn't available
+    if (!genAI) {
+        console.warn('Generative SDK not initialized; returning fallback MongoDB schema.');
+        const schema = fallbackGenerateSchema(projectContext || '');
+        return res.json({ schema, fallback: true });
+    }
+    try {
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        const promptParts = [{ text: `Please produce a MongoDB schema (collections, example documents, and recommended indexes) based on the following project context. Reply in Markdown format.
+
+CONTEXT:
+${projectContext || '(no project context provided)'}
+` }];
+
+        const result = await model.generateContent({ contents: [{ role: 'user', parts: promptParts }], generationConfig: { responseMimeType: 'text/plain' } });
+        const text = result.response.text();
+        res.json({ schema: text });
+    } catch (error) {
+        console.error('generate-mongo-schema error:', error && error.message ? error.message : error);
+        // If this is a GoogleGenerativeAIFetchError with quota info, surface retry info
+        const status = error && error.status ? error.status : 500;
+        let retryAfterSeconds = null;
+        try {
+            if (error && Array.isArray(error.errorDetails)) {
+                for (const d of error.errorDetails) {
+                    if (d && (d['@type'] || '').includes('RetryInfo') && d.retryDelay) {
+                        // retryDelay is like '34s' or '1.5s'
+                        const m = String(d.retryDelay).match(/([0-9]+)(?:\.\d+)?s/);
+                        if (m) retryAfterSeconds = parseInt(m[1], 10);
+                    }
+                }
+            }
+        } catch (e) {
+            // ignore parsing errors
+        }
+
+        // If quota/retry info is present, return both retry info and a fallback so local dev can continue
+        if (!genAI || retryAfterSeconds !== null || status === 429) {
+            const schema = fallbackGenerateSchema(projectContext || '');
+            const payload = { schema, fallback: true, message: 'Returned fallback due to generation error' };
+            if (retryAfterSeconds !== null) payload.retryAfterSeconds = retryAfterSeconds;
+            return res.status(200).json(payload);
+        }
+
+        const payload = { error: 'Generation failed', details: error && error.message ? error.message : String(error) };
+        if (retryAfterSeconds !== null) payload.retryAfterSeconds = retryAfterSeconds;
+        res.status(status).json(payload);
+    }
+});
+
+// Generate authentication scaffold (express + JWT) using Gemini
+app.post('/api/generate-auth', async (req, res) => {
+    const { projectContext } = req.body || {};
+    if (!genAI) {
+        console.warn('Generative SDK not initialized; returning fallback auth scaffold.');
+        const auth = fallbackGenerateAuth(projectContext || '');
+        return res.json({ auth, fallback: true });
+    }
+    try {
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        const promptParts = [{ text: `Please produce a concise authentication scaffold for a Node.js + Express application using MongoDB for user storage and JWT for sessions. Include example routes, data model, and a brief explanation. Reply with code snippets and minimal text. Context:
+
+${projectContext || '(no project context provided)'}
+` }];
+
+        const result = await model.generateContent({ contents: [{ role: 'user', parts: promptParts }], generationConfig: { responseMimeType: 'text/plain' } });
+        const text = result.response.text();
+        res.json({ auth: text });
+    } catch (error) {
+        console.error('generate-auth error:', error && error.message ? error.message : error);
+        const status = error && error.status ? error.status : 500;
+        let retryAfterSeconds = null;
+        try {
+            if (error && Array.isArray(error.errorDetails)) {
+                for (const d of error.errorDetails) {
+                    if (d && (d['@type'] || '').includes('RetryInfo') && d.retryDelay) {
+                        const m = String(d.retryDelay).match(/([0-9]+)(?:\.\d+)?s/);
+                        if (m) retryAfterSeconds = parseInt(m[1], 10);
+                    }
+                }
+            }
+        } catch (e) {}
+
+        if (!genAI || retryAfterSeconds !== null || status === 429) {
+            const auth = fallbackGenerateAuth(projectContext || '');
+            const payload = { auth, fallback: true, message: 'Returned fallback due to generation error' };
+            if (retryAfterSeconds !== null) payload.retryAfterSeconds = retryAfterSeconds;
+            return res.status(200).json(payload);
+        }
+
+        const payload = { error: 'Generation failed', details: error && error.message ? error.message : String(error) };
+        if (retryAfterSeconds !== null) payload.retryAfterSeconds = retryAfterSeconds;
+        res.status(status).json(payload);
+    }
+});
+
 // 4. Autonomous Project Detection
 app.post('/api/detect-project', (req, res) => {
     const { folderName, files } = req.body;
     console.log(`🔍 [Detect] Request for: ${folderName}`);
+    const projectContext = req.body && req.body.projectContext ? req.body.projectContext : null;
 
     let port = projectPortMap.has(folderName) ? projectPortMap.get(folderName) : nextAvailablePort++;
     projectPortMap.set(folderName, port);
@@ -168,30 +299,72 @@ app.post('/api/detect-project', (req, res) => {
     let framework = 'vanilla';
 
     try {
-        const pkgPath = path.join(projectPath, 'package.json');
-        if (fs.existsSync(pkgPath)) {
-            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-            const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-
-            if (deps['next']) {
+        // Prefer projectContext heuristics if provided (client-scanned file contents).
+        if (projectContext && typeof projectContext === 'string' && projectContext.length > 0) {
+            const ctx = projectContext.toLowerCase();
+            if (ctx.includes('next') || ctx.includes('next.config') || ctx.includes('@next')) {
                 type = 'next';
                 framework = 'nextjs';
-            } else if (deps['vite']) {
+            } else if (ctx.includes('vite') || ctx.includes('vite.config')) {
                 type = 'vite';
                 framework = 'vite';
-            } else if (deps['react-scripts']) {
+            } else if (ctx.includes('react-scripts') || ctx.includes('create-react-app') || ctx.includes('react-dom')) {
                 type = 'cra';
                 framework = 'react';
-            } else if (deps['@remix-run/dev']) {
+            } else if (ctx.includes('@remix-run') || ctx.includes('remix.config')) {
                 type = 'remix';
                 framework = 'remix';
+            } else if (ctx.includes('package.json')) {
+                // fallback: attempt to parse package.json snippet
+                try {
+                    const match = projectContext.match(/\{[\s\S]*?\}/);
+                    if (match) {
+                        const pkg = JSON.parse(match[0]);
+                        const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+                        if (deps && deps['next']) {
+                            type = 'next'; framework = 'nextjs';
+                        } else if (deps && deps['vite']) {
+                            type = 'vite'; framework = 'vite';
+                        } else if (deps && deps['react-scripts']) {
+                            type = 'cra'; framework = 'react';
+                        }
+                    }
+                } catch (e) {
+                    // ignore parse errors
+                }
             } else {
-                type = 'node';
-                framework = 'nodejs';
+                // Heuristic fallback: if many .tsx/.jsx files present, treat as React/node
+                const extCount = (projectContext.match(/\.tsx|\.jsx|import\s+React|from\s+'react'/g) || []).length;
+                if (extCount > 3) {
+                    type = 'node'; framework = 'nodejs';
+                }
+            }
+        } else {
+            const pkgPath = path.join(projectPath, 'package.json');
+            if (fs.existsSync(pkgPath)) {
+                const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+                const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+                if (deps['next']) {
+                    type = 'next';
+                    framework = 'nextjs';
+                } else if (deps['vite']) {
+                    type = 'vite';
+                    framework = 'vite';
+                } else if (deps['react-scripts']) {
+                    type = 'cra';
+                    framework = 'react';
+                } else if (deps['@remix-run/dev']) {
+                    type = 'remix';
+                    framework = 'remix';
+                } else {
+                    type = 'node';
+                    framework = 'nodejs';
+                }
             }
         }
     } catch (e) {
-        console.error(`   - Error during detection: ${e.message}`);
+        console.error(`   - Error during detection: ${e && e.message ? e.message : e}`);
     }
 
     console.log(`   - Detected: ${type} (${framework}), Port: ${port}`);
@@ -269,6 +442,17 @@ app.post('/api/run-project', async (req, res) => {
 
         activeProcesses.set(projectName, child);
 
+        // Ensure we log child lifecycle events so the server doesn't silently
+        // stop or leave stale state when a dev server process exits.
+        child.on('exit', (code, signal) => {
+            console.log(`[${projectName}] child exited with code=${code} signal=${signal}`);
+            if (activeProcesses.has(projectName)) activeProcesses.delete(projectName);
+        });
+
+        child.on('error', (err) => {
+            console.error(`[${projectName}] child process error:`, err);
+        });
+
         // Wait for the server to be ready before responding
         console.log(`   - Waiting for port ${port} check...`);
         const isReady = await checkPortReady(port, projectType === 'next' ? 60 : 30); // Frameworks are slower
@@ -293,4 +477,101 @@ app.post('/api/stop-project', (req, res) => {
     res.json({ success: stopped, message: stopped ? `Stopped ${projectName}` : "No active process found" });
 });
 
-app.listen(5000, () => console.log('Backend Online: Port 5000'));
+// Allow server port override via env (useful for dev) and create HTTP server explicitly
+const SERVER_PORT = process.env.SERVER_PORT ? parseInt(process.env.SERVER_PORT, 10) : 5000;
+// Create HTTP server explicitly so we can attach an error handler before calling listen
+const httpServer = http.createServer(app);
+
+httpServer.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${SERVER_PORT} already in use (EADDRINUSE). Another process is listening on this port.`);
+        console.error(`   - Run ` + "netstat -ano | findstr " + SERVER_PORT + "` to find the PID, then `tasklist /FI \"PID eq <pid>\"` to inspect the process.");
+        // When running tests, we allow the import to proceed even if port is busy.
+        if (process.env.DISABLE_AUTO_LISTEN === '1') {
+            console.warn('DISABLE_AUTO_LISTEN=1; skipping exit on EADDRINUSE to allow test harness to start ephemeral servers.');
+            return;
+        }
+        process.exit(1);
+    }
+    console.error('HTTP server error:', err && err.stack ? err.stack : err);
+});
+
+httpServer.on('close', () => {
+    console.log('HTTP server closed event emitted');
+});
+
+// Only auto-listen when not disabled (allows tests to import app without binding ports)
+if (process.env.DISABLE_AUTO_LISTEN !== '1') {
+    httpServer.listen(SERVER_PORT, () => console.log(`Backend Online: Port ${SERVER_PORT}`));
+} else {
+    console.log('Auto-listen disabled (DISABLE_AUTO_LISTEN=1). Server exported for testing.');
+}
+
+// Export app and httpServer for test harnesses or programmatic control
+export { app, httpServer, genAI, fallbackGenerateSchema, fallbackGenerateAuth };
+
+process.on('beforeExit', (code) => {
+    console.log(`process beforeExit event with code: ${code}`);
+});
+
+process.on('exit', (code) => {
+    console.log(`process exit event with code: ${code}`);
+});
+
+// Debug endpoint to check runtime state without causing side-effects
+app.get('/api/debug', (req, res) => {
+    res.json({
+        uptime: process.uptime(),
+        pid: process.pid,
+        genAIInitialized: !!genAI,
+        activeProcesses: Array.from(activeProcesses.keys()),
+        activeStaticServers: Array.from(activeStaticServers.keys()),
+        envLoaded: !!process.env.GEMINI_API_KEY
+    });
+});
+
+// Graceful shutdown: stop child processes and static servers before exiting.
+const gracefulShutdown = async (signal) => {
+    console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+    try {
+        for (const [name, child] of activeProcesses.entries()) {
+            try {
+                console.log(`   - Killing child process for ${name}`);
+                child.kill('SIGINT');
+            } catch (e) {
+                console.warn(`   - Failed to kill child for ${name}:`, e && e.message ? e.message : e);
+            }
+        }
+        activeProcesses.clear();
+
+        for (const [name, entry] of activeStaticServers.entries()) {
+            try {
+                console.log(`   - Closing static server for ${name}`);
+                entry.server.close();
+            } catch (e) {
+                console.warn(`   - Failed to close static server for ${name}:`, e && e.message ? e.message : e);
+            }
+        }
+        activeStaticServers.clear();
+
+        if (httpServer && typeof httpServer.close === 'function') {
+            httpServer.close(() => {
+                console.log('HTTP server closed. Exiting process.');
+                process.exit(0);
+            });
+            // Force exit after timeout
+            setTimeout(() => {
+                console.warn('Forcing exit after timeout.');
+                process.exit(1);
+            }, 5000).unref();
+        } else {
+            process.exit(0);
+        }
+    } catch (e) {
+        console.error('Error during graceful shutdown:', e);
+        process.exit(1);
+    }
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

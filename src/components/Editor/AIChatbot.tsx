@@ -11,7 +11,7 @@ interface Message {
 
 interface AIChatbotProps {
     cacheName: string | null;
-    createFileAtPath: (path: string, content: string) => Promise<any>;
+    createFileAtPath: (path: string, content: string) => Promise<FileSystemFileHandle | null>;
     pendingFiles: { path: string, content: string }[];
     setPendingFiles: (files: { path: string, content: string }[] | ((prev: { path: string, content: string }[]) => { path: string, content: string }[])) => void;
 }
@@ -117,12 +117,13 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
             };
 
             setMessages(prev => [...prev, aiMessage]);
-        } catch (error: any) {
+        } catch (error) {
             console.error("Chat Error:", error);
+            const msg = String(error && (error as any).message ? (error as any).message : error);
             const errorMessage: Message = {
                 id: Date.now().toString(),
                 role: 'ai',
-                content: `Error: ${error.message || 'Something went wrong.'}`,
+                content: `Error: ${msg || 'Something went wrong.'}`,
                 timestamp: new Date(),
             };
             setMessages(prev => [...prev, errorMessage]);
@@ -148,7 +149,7 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
     const extractFilesFromMarkdown = (text: string) => {
         const files: { path: string, content: string }[] = [];
         // Catch ### filename.ext, **filename.ext**, File: filename.ext, etc.
-        const fileHeaderRegex = /(?:###|##|#|File:?|Filename:?|\*\*)\s*(?:\d+\.?\s*)?[`*]?([a-zA-Z0-9._\-\/ ]+\.[a-zA-Z0-9]+)[`*]?[\s\S]*?\n\s*```(?:[a-z]*)\n([\s\S]*?)```/gi;
+    const fileHeaderRegex = /(?:###|##|#|File:?|Filename:?|\*\*)\s*(?:\d+\.?\s*)?[`*]?([a-zA-Z0-9._\-/ ]+\.[a-zA-Z0-9]+)[`*]?[\s\S]*?\n\s*```(?:[a-z]*)\n([\s\S]*?)```/gi;
 
         let match;
         while ((match = fileHeaderRegex.exec(text)) !== null) {

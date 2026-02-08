@@ -11,7 +11,7 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
     const [isLaunching, setIsLaunching] = useState(false);
     const [projectStatus, setProjectStatus] = useState<string | null>(null);
 
-    const detectAndRunProject = useCallback(async (fileNames: string[]) => {
+    const detectAndRunProject = useCallback(async (fileNames: string[], projectContext: string | null = null) => {
         if (!directoryHandle) return;
         setIsLaunching(true);
         console.log("🚀 Starting autonomous runner for:", directoryHandle.name);
@@ -22,9 +22,15 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     folderName: directoryHandle.name,
-                    files: fileNames
+                    files: fileNames,
+                    projectContext
                 })
             });
+            if (!detectRes.ok) {
+                const errText = await detectRes.text().catch(() => null);
+                console.error('detect-project failed:', detectRes.status, errText);
+                return;
+            }
             const projectInfo = await detectRes.json();
             setProjectType(projectInfo.type);
             setFramework(projectInfo.framework);
@@ -40,6 +46,11 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
                     port: projectInfo.port
                 })
             });
+            if (!runRes.ok) {
+                const errText = await runRes.text().catch(() => null);
+                console.error('run-project failed:', runRes.status, errText);
+                return;
+            }
             const runInfo = await runRes.json();
             console.log("🎯 Run response:", runInfo);
             setProjectStatus(runInfo.status);
@@ -51,7 +62,9 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
                 console.error("❌ No URL returned from run-project", runInfo.message);
             }
         } catch (error) {
-            console.error("❌ Autonomous Project Runner Failed:", error);
+            // Network errors will be caught here (e.g., backend not running). Make the
+            // message clearer for developers while avoiding uncaught rejections.
+            console.error("❌ Autonomous Project Runner Failed (network or server error):", error);
         } finally {
             console.log("🏁 Setting isLaunching to false");
             setIsLaunching(false);
@@ -67,12 +80,13 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
                 body: JSON.stringify({ projectName: directoryHandle.name })
             });
             console.log("Autonomous runner stopped project:", directoryHandle.name);
+            // Only clear preview when stop succeeded.
             setPreviewUrl(null);
             setProjectType(null);
             setFramework(null);
             setProjectStatus(null);
         } catch (error) {
-            console.error("Failed to stop project:", error);
+            console.error("Failed to stop project (is the local runner running?):", error);
         }
     }, [directoryHandle]);
 
@@ -84,13 +98,18 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ projectFiles: projectContext })
             });
-            const data = await response.json();
-            if (data.cacheName) {
-                setCacheName(data.cacheName);
-                console.log("Cache created:", data.cacheName);
+            if (!response.ok) {
+                const body = await response.text().catch(() => null);
+                console.error('cache-codebase failed:', response.status, body);
+            } else {
+                const data = await response.json();
+                if (data.cacheName) {
+                    setCacheName(data.cacheName);
+                    console.log("Cache created:", data.cacheName);
+                }
             }
         } catch (error) {
-            console.error("Failed to create cache:", error);
+            console.error("Failed to create cache (network or server error):", error);
         } finally {
             setIsCaching(false);
         }
@@ -146,9 +165,9 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
             console.log(`📂 scanProject: Scan complete. Found ${fileNames.length} files.`);
             setContext(fullContext);
 
-            // Trigger autonomous detection and running
+            // Trigger autonomous detection and running (include project context for better detection)
             console.log("📂 scanProject: Triggering detectAndRunProject...");
-            detectAndRunProject(fileNames);
+            detectAndRunProject(fileNames, fullContext);
 
             if (fullContext) {
                 createCache(fullContext);
