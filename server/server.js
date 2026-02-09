@@ -116,6 +116,49 @@ function fallbackGenerateAuth(projectContext) {
     return `# Auth scaffold (fallback)\n\nThis is a deterministic fallback auth scaffold for development and testing. Replace with a production-ready implementation when ready.\n\n## Overview\n- Express routes: /auth/register, /auth/login, /auth/me\n- Storage: MongoDB users collection with password hashes (bcrypt)\n- Session: JWT stored in Authorization header (Bearer)\n\n## Example code snippets\n\n// register (pseudo)\nPOST /auth/register\n{ email, password } -> create user with passwordHash\n\n// login (pseudo)\nPOST /auth/login\n{ email, password } -> verify password, return JWT\n\n// middleware (pseudo)\nfunction authMiddleware(req, res, next) {\n  const token = req.headers.authorization?.split(' ')[1];\n  // verify JWT and attach userId to req.user\n}\n\n// Notes:\n- Use bcrypt for password hashing\n- Use a short-lived access token with refresh tokens if needed\n\n// Context summary:\n${projectContext ? projectContext.slice(0, 1000) : '(none)'}\n`;
 }
 
+// Helper to handle Gemini errors consistently
+function handleGeminiError(error, res, fallbackContent = null) {
+    console.error('Gemini API Error:', error && error.message ? error.message : error);
+
+    const status = error && error.status ? error.status : 500;
+    let retryAfterSeconds = null;
+
+    try {
+        if (error && Array.isArray(error.errorDetails)) {
+            for (const d of error.errorDetails) {
+                if (d && (d['@type'] || '').includes('RetryInfo') && d.retryDelay) {
+                    const m = String(d.retryDelay).match(/([0-9]+)(?:\.\d+)?s/);
+                    if (m) retryAfterSeconds = parseInt(m[1], 10);
+                }
+            }
+        }
+    } catch (e) { /* ignore parsing errors */ }
+
+    // If quota/retry info is present, or 429, handle gracefully
+    if (retryAfterSeconds !== null || status === 429) {
+        const message = retryAfterSeconds
+            ? `Quota exceeded. Please retry in ${retryAfterSeconds}s.`
+            : 'Quota exceeded. Please try again later.';
+
+        // If we have fallback content (e.g. for schema/auth), return it with a warning
+        if (fallbackContent) {
+            const payload = { ...fallbackContent, fallback: true, message, retryAfterSeconds };
+            return res.status(200).json(payload);
+        }
+
+        // Otherwise return 429 error
+        const payload = { error: message, details: message };
+        if (retryAfterSeconds) payload.retryAfterSeconds = retryAfterSeconds;
+        return res.status(429).json(payload);
+    }
+
+    // Standard error
+    return res.status(status).json({
+        error: "AI Generation Failed",
+        details: error && error.message ? error.message : String(error)
+    });
+}
+
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', port: 5000 }));
 
@@ -167,7 +210,7 @@ app.post('/api/architect', async (req, res) => {
         const result = await model.generateContent({ contents: [{ role: "user", parts }], generationConfig: { responseMimeType: "application/json" } });
         res.json(JSON.parse(result.response.text()));
     } catch (error) {
-        res.status(500).json({ error: "Architect failed", details: error.message });
+        handleGeminiError(error, res);
     }
 });
 
@@ -175,12 +218,13 @@ app.post('/api/chat', async (req, res) => {
     try {
         if (!genAI) return res.status(503).json({ error: 'Generative AI SDK not initialized' });
         const { message, history } = req.body;
-        const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+        // Use gemini-1.5-flash for better stability if available, or fallback to latest
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
         const chat = model.startChat({ history: history || [] });
         const result = await chat.sendMessage(message);
         res.json({ reply: (await result.response).text() });
     } catch (error) {
-        res.status(500).json({ error: "Chat failed", details: error.message });
+        handleGeminiError(error, res);
     }
 });
 
@@ -205,36 +249,10 @@ ${projectContext || '(no project context provided)'}
         const result = await model.generateContent({ contents: [{ role: 'user', parts: promptParts }], generationConfig: { responseMimeType: 'text/plain' } });
         const text = result.response.text();
         res.json({ schema: text });
+
     } catch (error) {
-        console.error('generate-mongo-schema error:', error && error.message ? error.message : error);
-        // If this is a GoogleGenerativeAIFetchError with quota info, surface retry info
-        const status = error && error.status ? error.status : 500;
-        let retryAfterSeconds = null;
-        try {
-            if (error && Array.isArray(error.errorDetails)) {
-                for (const d of error.errorDetails) {
-                    if (d && (d['@type'] || '').includes('RetryInfo') && d.retryDelay) {
-                        // retryDelay is like '34s' or '1.5s'
-                        const m = String(d.retryDelay).match(/([0-9]+)(?:\.\d+)?s/);
-                        if (m) retryAfterSeconds = parseInt(m[1], 10);
-                    }
-                }
-            }
-        } catch (e) {
-            // ignore parsing errors
-        }
-
-        // If quota/retry info is present, return both retry info and a fallback so local dev can continue
-        if (!genAI || retryAfterSeconds !== null || status === 429) {
-            const schema = fallbackGenerateSchema(projectContext || '');
-            const payload = { schema, fallback: true, message: 'Returned fallback due to generation error' };
-            if (retryAfterSeconds !== null) payload.retryAfterSeconds = retryAfterSeconds;
-            return res.status(200).json(payload);
-        }
-
-        const payload = { error: 'Generation failed', details: error && error.message ? error.message : String(error) };
-        if (retryAfterSeconds !== null) payload.retryAfterSeconds = retryAfterSeconds;
-        res.status(status).json(payload);
+        const fallbackSchema = fallbackGenerateSchema(projectContext || '');
+        handleGeminiError(error, res, { schema: fallbackSchema });
     }
 });
 
@@ -257,31 +275,10 @@ ${projectContext || '(no project context provided)'}
         const result = await model.generateContent({ contents: [{ role: 'user', parts: promptParts }], generationConfig: { responseMimeType: 'text/plain' } });
         const text = result.response.text();
         res.json({ auth: text });
+
     } catch (error) {
-        console.error('generate-auth error:', error && error.message ? error.message : error);
-        const status = error && error.status ? error.status : 500;
-        let retryAfterSeconds = null;
-        try {
-            if (error && Array.isArray(error.errorDetails)) {
-                for (const d of error.errorDetails) {
-                    if (d && (d['@type'] || '').includes('RetryInfo') && d.retryDelay) {
-                        const m = String(d.retryDelay).match(/([0-9]+)(?:\.\d+)?s/);
-                        if (m) retryAfterSeconds = parseInt(m[1], 10);
-                    }
-                }
-            }
-        } catch (e) { }
-
-        if (!genAI || retryAfterSeconds !== null || status === 429) {
-            const auth = fallbackGenerateAuth(projectContext || '');
-            const payload = { auth, fallback: true, message: 'Returned fallback due to generation error' };
-            if (retryAfterSeconds !== null) payload.retryAfterSeconds = retryAfterSeconds;
-            return res.status(200).json(payload);
-        }
-
-        const payload = { error: 'Generation failed', details: error && error.message ? error.message : String(error) };
-        if (retryAfterSeconds !== null) payload.retryAfterSeconds = retryAfterSeconds;
-        res.status(status).json(payload);
+        const fallbackAuth = fallbackGenerateAuth(projectContext || '');
+        handleGeminiError(error, res, { auth: fallbackAuth });
     }
 });
 
