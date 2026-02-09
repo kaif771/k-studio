@@ -176,7 +176,7 @@ app.post('/api/cache-codebase', async (req, res) => {
         // Note: Caching API may not be available in all SDK versions
         // This is an optional optimization feature
         try {
-            const model = "gemini-1.5-flash-001";
+            const model = "gemini-2.0-flash";
             const cache = await genAI.getGenerativeModel({ model }).createCachedContent({
                 model,
                 displayName: "Gemini_Architect_Context",
@@ -218,8 +218,8 @@ app.post('/api/chat', async (req, res) => {
     try {
         if (!genAI) return res.status(503).json({ error: 'Generative AI SDK not initialized' });
         const { message, history } = req.body;
-        // Use gemini-1.5-flash for better stability if available, or fallback to latest
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        // Use gemini-2.0-flash for consistency and availability
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
         const chat = model.startChat({ history: history || [] });
         const result = await chat.sendMessage(message);
         res.json({ reply: (await result.response).text() });
