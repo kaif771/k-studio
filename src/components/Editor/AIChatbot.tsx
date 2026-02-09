@@ -84,7 +84,7 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
                 }));
 
             // REAL API CALL: Update to your server's endpoint
-            const response = await fetch('http://localhost:5000/api/chat', {
+            const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -149,7 +149,7 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
     const extractFilesFromMarkdown = (text: string) => {
         const files: { path: string, content: string }[] = [];
         // Catch ### filename.ext, **filename.ext**, File: filename.ext, etc.
-    const fileHeaderRegex = /(?:###|##|#|File:?|Filename:?|\*\*)\s*(?:\d+\.?\s*)?[`*]?([a-zA-Z0-9._\-/ ]+\.[a-zA-Z0-9]+)[`*]?[\s\S]*?\n\s*```(?:[a-z]*)\n([\s\S]*?)```/gi;
+        const fileHeaderRegex = /(?:###|##|#|File:?|Filename:?|\*\*)\s*(?:\d+\.?\s*)?[`*]?([a-zA-Z0-9._\-/ ]+\.[a-zA-Z0-9]+)[`*]?[\s\S]*?\n\s*```(?:[a-z]*)\n([\s\S]*?)```/gi;
 
         let match;
         while ((match = fileHeaderRegex.exec(text)) !== null) {

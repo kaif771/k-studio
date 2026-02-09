@@ -17,7 +17,7 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
         console.log("🚀 Starting autonomous runner for:", directoryHandle.name);
         try {
             // 1. Detect project type
-            const detectRes = await fetch('http://localhost:5000/api/detect-project', {
+            const detectRes = await fetch('/api/detect-project', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -37,7 +37,7 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
             console.log("📦 Detected project:", projectInfo.type, "Framework:", projectInfo.framework, "Port:", projectInfo.port);
 
             // 2. Run the project
-            const runRes = await fetch('http://localhost:5000/api/run-project', {
+            const runRes = await fetch('/api/run-project', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -74,7 +74,7 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
     const stopProject = useCallback(async () => {
         if (!directoryHandle) return;
         try {
-            await fetch('http://localhost:5000/api/stop-project', {
+            await fetch('/api/stop-project', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ projectName: directoryHandle.name })
@@ -93,7 +93,7 @@ export const useProjectContext = (directoryHandle: FileSystemDirectoryHandle | n
     const createCache = useCallback(async (projectContext: string) => {
         setIsCaching(true);
         try {
-            const response = await fetch('http://localhost:5000/api/cache-codebase', {
+            const response = await fetch('/api/cache-codebase', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ projectFiles: projectContext })

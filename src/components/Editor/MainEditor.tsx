@@ -73,7 +73,7 @@ export const MainEditor: React.FC<MainEditorProps> = ({
     const extractFilesFromMarkdown = (text: string) => {
         const files: { path: string, content: string }[] = [];
         // Catch ### filename.ext, **filename.ext**, File: filename.ext, etc.
-    const fileHeaderRegex = /(?:###|##|#|File:?|Filename:?|\*\*)\s*(?:\d+\.?\s*)?[`*]?([a-zA-Z0-9._\-/ ]+\.[a-zA-Z0-9]+)[`*]?[\s\S]*?\n\s*```(?:[a-z]*)\n([\s\S]*?)```/gi;
+        const fileHeaderRegex = /(?:###|##|#|File:?|Filename:?|\*\*)\s*(?:\d+\.?\s*)?[`*]?([a-zA-Z0-9._\-/ ]+\.[a-zA-Z0-9]+)[`*]?[\s\S]*?\n\s*```(?:[a-z]*)\n([\s\S]*?)```/gi;
 
         let match;
         while ((match = fileHeaderRegex.exec(text)) !== null) {
@@ -146,7 +146,7 @@ export const MainEditor: React.FC<MainEditorProps> = ({
         setIsCommandOpen(false);
 
         try {
-            const response = await fetch('http://localhost:5000/api/architect', {
+            const response = await fetch('/api/architect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

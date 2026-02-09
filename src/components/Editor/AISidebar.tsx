@@ -14,12 +14,12 @@ export const AISidebar: React.FC<AISidebarProps> = ({ projectContext = '', creat
     const [authCountdown, setAuthCountdown] = useState<number | null>(null);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const API_BASE = (import.meta.env && (import.meta.env.VITE_API_URL as string)) || (window && (window as any).__API_BASE__) || 'http://localhost:5000';
+    const API_BASE = (import.meta.env && (import.meta.env.VITE_API_URL as string)) || (window && (window as any).__API_BASE__) || '';
 
     const handleGenerateSchema = async () => {
         setIsGeneratingSchema(true);
         setSchemaResult(null);
-    setSchemaCountdown(null);
+        setSchemaCountdown(null);
         try {
             const res = await fetch(`${API_BASE}/api/generate-mongo-schema`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectContext: projectContext || '' }) });
             if (!res.ok) {
@@ -45,7 +45,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({ projectContext = '', creat
     const handleGenerateAuth = async () => {
         setIsGeneratingAuth(true);
         setAuthResult(null);
-    setAuthCountdown(null);
+        setAuthCountdown(null);
         try {
             const res = await fetch(`${API_BASE}/api/generate-auth`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectContext: projectContext || '' }) });
             if (!res.ok) {

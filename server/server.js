@@ -195,7 +195,8 @@ app.post('/api/generate-mongo-schema', async (req, res) => {
     }
     try {
         const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-        const promptParts = [{ text: `Please produce a MongoDB schema (collections, example documents, and recommended indexes) based on the following project context. Reply in Markdown format.
+        const promptParts = [{
+            text: `Please produce a MongoDB schema (collections, example documents, and recommended indexes) based on the following project context. Reply in Markdown format.
 
 CONTEXT:
 ${projectContext || '(no project context provided)'}
@@ -247,7 +248,8 @@ app.post('/api/generate-auth', async (req, res) => {
     }
     try {
         const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-        const promptParts = [{ text: `Please produce a concise authentication scaffold for a Node.js + Express application using MongoDB for user storage and JWT for sessions. Include example routes, data model, and a brief explanation. Reply with code snippets and minimal text. Context:
+        const promptParts = [{
+            text: `Please produce a concise authentication scaffold for a Node.js + Express application using MongoDB for user storage and JWT for sessions. Include example routes, data model, and a brief explanation. Reply with code snippets and minimal text. Context:
 
 ${projectContext || '(no project context provided)'}
 ` }];
@@ -268,7 +270,7 @@ ${projectContext || '(no project context provided)'}
                     }
                 }
             }
-        } catch (e) {}
+        } catch (e) { }
 
         if (!genAI || retryAfterSeconds !== null || status === 429) {
             const auth = fallbackGenerateAuth(projectContext || '');
@@ -501,11 +503,13 @@ httpServer.on('close', () => {
 });
 
 // Only auto-listen when not disabled (allows tests to import app without binding ports)
-if (process.env.DISABLE_AUTO_LISTEN !== '1') {
-    httpServer.listen(SERVER_PORT, () => console.log(`Backend Online: Port ${SERVER_PORT}`));
-} else {
-    console.log('Auto-listen disabled (DISABLE_AUTO_LISTEN=1). Server exported for testing.');
-}
+// if (process.env.DISABLE_AUTO_LISTEN !== '1') {
+//     httpServer.listen(SERVER_PORT, () => console.log(`Backend Online: Port ${SERVER_PORT}`));
+// } else {
+//     console.log('Auto-listen disabled (DISABLE_AUTO_LISTEN=1). Server exported for testing.');
+// }
+
+export default app;
 
 // Export app and httpServer for test harnesses or programmatic control
 export { app, httpServer, genAI, fallbackGenerateSchema, fallbackGenerateAuth };
