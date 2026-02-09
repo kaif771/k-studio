@@ -97,7 +97,9 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 let genAI = null;
 try {
     // SDK initialization may throw synchronously if keys are invalid or missing.
-    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const key = process.env.GEMINI_API_KEY;
+    console.log(`🔑 initializing SDK with key starting: ${key ? key.substring(0, 4) + '...' : 'undefined'}`);
+    genAI = new GoogleGenerativeAI(key);
 } catch (initErr) {
     console.error('⚠️ Failed to initialize GoogleGenerativeAI SDK:', initErr && initErr.message ? initErr.message : initErr);
     genAI = null;
@@ -527,7 +529,8 @@ app.get('/api/debug', (req, res) => {
         genAIInitialized: !!genAI,
         activeProcesses: Array.from(activeProcesses.keys()),
         activeStaticServers: Array.from(activeStaticServers.keys()),
-        envLoaded: !!process.env.GEMINI_API_KEY
+        envLoaded: !!process.env.GEMINI_API_KEY,
+        keyPrefix: process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.substring(0, 4) : 'none'
     });
 });
 
