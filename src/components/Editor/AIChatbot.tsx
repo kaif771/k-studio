@@ -127,6 +127,9 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
                 timestamp: new Date(),
             };
             setMessages(prev => [...prev, errorMessage]);
+            // Restore input on error so user can retry
+            setInput(currentInput);
+            if (currentImage) setSelectedImage(currentImage);
         }
     };
 
