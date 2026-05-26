@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+
+
+@layer base {
+  body {
+    @apply bg-[#F4F5F9] text-[#1D1D1F] antialiased selection:bg-[#4F46E5]/20;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    /* Define the shadow as a standard CSS variable first */
+    --glass-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+
+    /* Apply simple Tailwind classes */
+    @apply bg-white/[0.03] backdrop-blur-xl border border-white/10;
+
+    /* Use standard CSS for the complex shadow */
+    box-shadow: var(--glass-shadow);
+  }
+}
+
+.neon-text-blue {
+  --neon-blue: 0 0 10px rgba(34, 211, 238, 0.5);
+  @apply text-cyan-400;
+  filter: drop-shadow(var(--neon-blue));
+}
+
+.neon-text-pink {
+  --neon-pink: 0 0 10px rgba(236, 72, 153, 0.5);
+  @apply text-pink-500;
+  filter: drop-shadow(var(--neon-pink));
+}
+
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(29, 29, 31, 0.15);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(29, 29, 31, 0.25);
+}
