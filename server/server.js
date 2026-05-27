@@ -847,8 +847,10 @@ app.post('/api/stop-project', (req, res) => {
     return res.json({ success: stopped, message: stopped ? `Stopped ${projectName}` : "No active process found" });
 });
 
-// ✅ NEW COMPATIBLE PERMANENT CODE:
-app.get('/:any*', (req, res) => {
+// ============================================================================
+// 🎯 100% BULLETPROOF WILDCARD RULE FOR SPA ROUTING (BYPASSES REGEXP PARSER)
+// ============================================================================
+app.use((req, res) => {
     const indexPath = path.join(distPath, 'index.html');
     if (fs.existsSync(indexPath)) {
         return res.sendFile(indexPath);
