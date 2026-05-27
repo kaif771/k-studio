@@ -847,8 +847,8 @@ app.post('/api/stop-project', (req, res) => {
     return res.json({ success: stopped, message: stopped ? `Stopped ${projectName}` : "No active process found" });
 });
 
-// Wildcard Fallback Rule for SPA Routing (Cleaned up asterisk conflict)
-app.get('*', (req, res) => {
+// ✅ NEW COMPATIBLE PERMANENT CODE:
+app.get('/:any*', (req, res) => {
     const indexPath = path.join(distPath, 'index.html');
     if (fs.existsSync(indexPath)) {
         return res.sendFile(indexPath);
