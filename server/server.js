@@ -808,25 +808,40 @@ app.post('/api/run-project', async (req, res) => {
 });
 
 
+// Startup Validation Check
+let workspaceDir = process.env.WORKSPACE_DIR;
+
+if (process.env.DISABLE_AUTO_LISTEN !== '1') {
+    // 1. Agar variable set hi nahi hai
+    if (!workspaceDir) {
+        console.error("❌ Startup Error: process.env.WORKSPACE_DIR is not set.");
+        process.exit(1);
+    }
+
+    // 2. PERMANENT CLOUD GUARD: Agar path real me exist nahi karta (jaise Vercel cloud par)
+    if (!fs.existsSync(workspaceDir) || !fs.statSync(workspaceDir).isDirectory()) {
+        console.log("⚠️ Invalid path detected. Overriding for Serverless Cloud Environment...");
+        
+        // Automatic OS temp folder dynamic assign karo
+        const fallbackPath = path.join(os.tmpdir(), 'k-studio-workspace');
+        if (!fs.existsSync(fallbackPath)) {
+            fs.mkdirSync(fallbackPath, { recursive: true });
+        }
+        
+        // Dono variables ko temporary update kar do
+        workspaceDir = fallbackPath;
+        process.env.WORKSPACE_DIR = fallbackPath;
+    }
+
+    console.log(`✅ Startup Validation Passed: Workspace linked safely at: ${workspaceRoot || workspaceDir}`);
+}
+
+// Tumhara route jaisa hai waisa hi rahega
 app.post('/api/stop-project', (req, res) => {
     const { projectName } = req.body;
     const stopped = stopProjectLogic(projectName);
     return res.json({ success: stopped, message: stopped ? `Stopped ${projectName}` : "No active process found" });
 });
-
-// Startup Validation Check
-const workspaceDir = process.env.WORKSPACE_DIR;
-if (process.env.DISABLE_AUTO_LISTEN !== '1') {
-    if (!workspaceDir) {
-        console.error("❌ Startup Error: process.env.WORKSPACE_DIR is not set.");
-        process.exit(1);
-    }
-    if (!fs.existsSync(workspaceDir) || !fs.statSync(workspaceDir).isDirectory()) {
-        console.error(`❌ Startup Error: process.env.WORKSPACE_DIR maps to an invalid directory.`);
-        process.exit(1);
-    }
-    console.log(`✅ Startup Validation Passed: Workspace linked safely.`);
-}
 
 // Wildcard Fallback Rule for SPA Routing
 app.get('/*splat', (req, res) => {
