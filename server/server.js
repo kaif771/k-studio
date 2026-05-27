@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import * as genAIModule from '@google/generative-ai';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -9,6 +9,9 @@ import fs from 'fs';
 import http from 'http';
 import net from 'net';
 import os from 'os';
+
+// Extract the required GoogleGenerativeAI class safely from module namespace
+const { GoogleGenerativeAI } = genAIModule;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,11 +40,11 @@ let rawWorkspace = process.env.WORKSPACE_DIR
 
 let workspaceRoot;
 
-// Check karo kya path real me laptop par moojud hai?
+// Check if the physical absolute workspace path exists (for local laptop development)
 if (rawWorkspace && fs.existsSync(path.resolve(rawWorkspace))) {
     workspaceRoot = path.resolve(rawWorkspace);
 } else {
-    // Agar cloud (Vercel) par ho toh safe tmp dir use karo
+    // Fall back to a cloud-safe Linux directory on Vercel
     workspaceRoot = path.join(os.tmpdir(), 'k-studio-workspace');
     if (!fs.existsSync(workspaceRoot)) {
         fs.mkdirSync(workspaceRoot, { recursive: true });
@@ -55,6 +58,7 @@ if (process.env.DISABLE_AUTO_LISTEN !== '1') {
     if (!process.env.WORKSPACE_DIR) {
         console.log("⚠️ process.env.WORKSPACE_DIR is empty. Applying fallback...");
     }
+    // Inject correct resolved directory globally to ensure no down-stream validation failures
     process.env.WORKSPACE_DIR = workspaceRoot;
     console.log(`✅ Startup Validation Passed: Workspace linked safely at: ${workspaceRoot}`);
 }
@@ -89,12 +93,14 @@ function resolveProjectDirectory(projectName) {
 
 function stopProjectLogic(projectName) {
     let stopped = false;
+    // 1. Kill dev server process
     if (activeProcesses.has(projectName)) {
         console.log(`Killing active process for: ${projectName}`);
         activeProcesses.get(projectName).kill('SIGINT');
         activeProcesses.delete(projectName);
         stopped = true;
     }
+    // 2. Close static server
     if (activeStaticServers.has(projectName)) {
         console.log(`Closing static server for: ${projectName}`);
         const { server } = activeStaticServers.get(projectName);
@@ -151,6 +157,7 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Serve compiled static built assets directly from the client distribution directory
 const distPath = path.resolve(__dirname, '../dist');
 app.use(express.static(distPath));
 
@@ -164,6 +171,7 @@ try {
     genAI = null;
 }
 
+// Local deterministic fallback generators for dev/test when SDK is unavailable or quota limited
 function fallbackGenerateSchema(projectContext) {
     const header = '# Suggested MongoDB Schema\n\n';
     const users = `## users\n\n- _id: ObjectId\n- email: string (unique)\n- passwordHash: string\n- roles: [string]\n- createdAt: ISODate\n- updatedAt: ISODate\n\nExample:\n\n{\n  "email": "user@example.com",\n  "passwordHash": "$2b$...",\n  "roles": ["user"]\n}\n\n`;
@@ -190,6 +198,7 @@ function isQuotaError(error) {
 
 function handleGeminiError(error, res, fallbackContent = null) {
     console.error('Gemini API Error:', error && error.message ? error.message : error);
+
     const status = error && error.status ? error.status : 500;
     let retryAfterSeconds = null;
 
@@ -202,7 +211,7 @@ function handleGeminiError(error, res, fallbackContent = null) {
                 }
             }
         }
-    } catch (e) { /* ignore */ }
+    } catch (e) { /* ignore parsing errors */ }
 
     if (retryAfterSeconds !== null || status === 429 || isQuotaError(error)) {
         const message = retryAfterSeconds
@@ -225,6 +234,7 @@ function handleGeminiError(error, res, fallbackContent = null) {
     });
 }
 
+// Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', port: 5000 }));
 
 const normalizeWorkspaceTarget = (targetPath, rootPath = workspaceRoot) => {
@@ -236,9 +246,11 @@ const normalizeWorkspaceTarget = (targetPath, rootPath = workspaceRoot) => {
     return resolvedPath;
 };
 
+// Sync-and-build pipeline
 app.post('/api/workspace/sync-and-build', async (req, res) => {
     try {
         const { targetPath, code, projectName } = req.body || {};
+
         if (!targetPath || typeof targetPath !== 'string' || typeof code !== 'string') {
             return res.status(400).json({ error: 'targetPath and code are required and must be strings' });
         }
@@ -281,15 +293,44 @@ app.post('/api/workspace/sync-and-build', async (req, res) => {
     }
 });
 
+// Cache codebase endpoint with robust dynamic imports guard
 app.post('/api/cache-codebase', async (req, res) => {
     try {
-        console.log("ℹ️ Cache engine optimization active: Streaming data pipelines directly.");
-        return res.json({ cacheName: null, message: "Orchestration active using direct channels." });
+        if (!genAI) return res.status(503).json({ cacheName: null, message: 'Generative AI SDK not initialized' });
+        const { projectFiles } = req.body;
+
+        if (!projectFiles || projectFiles.trim().length === 0) {
+            return res.json({ cacheName: null, message: "No project files to cache" });
+        }
+
+        // Dynamic checking to prevent named ESM import crash if Vercel is using an older package
+        if (typeof genAIModule.GoogleGenAICacheManager !== 'undefined') {
+            try {
+                const model = "models/gemini-1.5-flash";
+                const cacheManager = new genAIModule.GoogleGenAICacheManager(process.env.GEMINI_API_KEY);
+                const cache = await cacheManager.create({
+                    model,
+                    displayName: "Gemini_Architect_Context",
+                    ttlSeconds: 3600,
+                    contents: [{ role: "user", parts: [{ text: projectFiles }] }],
+                });
+                console.log("🚀 Context Cache created successfully via Manager:", cache.name);
+                return res.json({ cacheName: cache.name });
+            } catch (innerCacheError) {
+                console.warn("⚠️ Caching manager execution bypassed:", innerCacheError.message);
+                return res.json({ cacheName: null, message: "Caching bypassed, directly accessing primary API." });
+            }
+        } else {
+            console.log("ℹ️ Cache Manager not exposed in current SDK version. Streaming direct connections instead.");
+            return res.json({ cacheName: null, message: "Direct channel optimization active." });
+        }
     } catch (error) {
+        console.error("Cache endpoint error:", error);
         return res.json({ cacheName: null, details: error.message });
     }
 });
 
+// Architect Engine Endpoint
 app.post('/api/architect', async (req, res) => {
     try {
         if (!genAI) return res.status(503).json({ error: 'Generative AI SDK not initialized' });
@@ -311,22 +352,39 @@ app.post('/api/architect', async (req, res) => {
     }
 });
 
+// ============================================================================
+// 🤖 ANTIGRAVITY & CODEC ELITE AI AGENT CHAT ENDPOINT (KAIF DEV AGENCY PERSONA)
+// ============================================================================
 app.post('/api/chat', async (req, res) => {
     try {
         if (!genAI) return res.status(503).json({ error: 'Generative AI SDK not initialized' });
+        
         const { message, history, projectContext, model: requestedModel, cacheName } = req.body;
 
         const modelFallbackStack = [
-            requestedModel ? `models/${requestedModel.replace(/^models\//, '')}` : "models/gemini-1.5-flash", 
-            "models/gemini-1.5-flash",
-            "models/gemini-2.0-flash"
+            requestedModel ? `models/${requestedModel.replace(/^models\//, '')}` : "models/gemini-2.0-flash", 
+            "models/gemini-2.0-flash",
+            "models/gemini-1.5-flash"
         ];
 
-        const baseSystemInstruction = `You are an advanced AI Code Editor Agent for K-Studio. Your job is to analyze the user's project context, look at any uploaded blueprints/images, and output production-ready code blocks. 
-CRITICAL: You must always explicitly label code blocks with the exact target file path in the markdown header format: \`### path/to/file.ext\` followed by a valid code block, so the client-side parser can automatically capture and apply the file drafts.`;
+        // 🌟 KAIF DEV AGENCY PERSONA: Antigravity & Codec Matrix Subsystem
+        const baseSystemInstruction = `You are the K-Studio Elite Autonomous Developer Subsystem (Antigravity & Codec Engine). 
+You speak and code with extreme precision, energy, and visual clarity.
+
+CRITICAL PROTOCOLS:
+1. Always start your response with a brief cybernetic status/compilation log to represent execution flow. For example:
+   "⚡ [MATRIX INIT: COMPILING SYSTEM VECTORS]"
+   "⚙️ [ANALYZING WORKSPACE INFRASTRUCTURE]"
+2. Write clean, modular, production-grade code that is highly optimized and responsive.
+3. You MUST always explicitly label code blocks with the exact target file path in the markdown header format:
+   ### path/to/file.ext
+   followed by a valid code block, so the client-side editor parser can capture it and apply drafts safely.
+4. Conclude your generation with a professional Performance Metric report highlighting:
+   - Breakpoints/Responsiveness patterns utilized (e.g. Flexbox/Grid systems, transition parameters).
+   - Speed/Execution patterns (e.g. state management hooks, clean component logic, zero codebase bloat).`;
 
         const fullSystemInstruction = projectContext
-            ? `${baseSystemInstruction}\n\nHere is the current workspace project files tree and context:\n${projectContext}`
+            ? `${baseSystemInstruction}\n\n[WORKSPACE ARCHITECTURE & PROJECT CONTEXT]:\n${projectContext}`
             : baseSystemInstruction;
 
         let replyText = null;
@@ -337,9 +395,15 @@ CRITICAL: You must always explicitly label code blocks with the exact target fil
             try {
                 console.log(`🤖 [AI Engine] Dispatching request payload to target branch: ${modelIdentifier}`);
                 
-                const modelOptions = { model: modelIdentifier, systemInstruction: fullSystemInstruction };
+                const modelOptions = { 
+                    model: modelIdentifier,
+                    systemInstruction: fullSystemInstruction
+                };
+
+                // Safely apply cache only if Vercel created a valid token string
                 if (cacheName && typeof cacheName === 'string' && cacheName.startsWith('cachedContents/')) {
                     modelOptions.cachedContent = cacheName;
+                    console.log(`⚡ Linkage success with active caching context token: ${cacheName}`);
                 }
 
                 const modelInstance = genAI.getGenerativeModel(modelOptions);
@@ -360,37 +424,51 @@ CRITICAL: You must always explicitly label code blocks with the exact target fil
         } else {
             throw new Error("All generative orchestration instances on the cluster pool are currently exhausted.");
         }
+
     } catch (error) {
-        console.error("❌ Fatal Error in core chat endpoint:", error);
-        return res.status(500).json({ error: error.message || "Internal corestructural failure." });
+        console.error("❌ Fatal Error in client context core chat endpoint:", error);
+        return res.status(500).json({ error: error.message || "Internal core structural matrix compilation failure." });
     }
 });
 
+// ============================================================================
+// 🗄️ MONGO SCHEMA GENERATOR (SAFE - NO AUTONOMOUS DISK WRITING - DE-DUPLICATED)
+// ============================================================================
 app.post('/api/generate-mongo-schema', async (req, res) => {
     const { projectContext } = req.body || {};
+    
     if (!genAI) {
+        console.warn('⚠️ Generative SDK cold-state deployment; generating abstract structural fallback object downstream.');
         const schema = fallbackGenerateSchema(projectContext || '');
         return res.json({ schema, fallback: true });
     }
+
     try {
         const modelInstance = genAI.getGenerativeModel({ model: 'models/gemini-1.5-flash' });
         const promptParts = [{
             text: `Please produce a MongoDB schema (collections, example documents, and recommended indexes) based on the following project context. Reply in Markdown format.\n\nCONTEXT:\n${projectContext || '(no project context provided)'}`
         }];
+
         const result = await modelInstance.generateContent({ 
             contents: [{ role: 'user', parts: promptParts }], 
             generationConfig: { responseMimeType: 'text/plain' } 
         });
-        return res.json({ schema: result.response.text() });
+        
+        const text = result.response.text();
+        return res.json({ schema: text });
+
     } catch (error) {
+        console.error("❌ Schema Compilation Vector crashed. Instantiating safety data matrix.");
         const fallbackSchema = fallbackGenerateSchema(projectContext || '');
         return handleGeminiError(error, res, { schema: fallbackSchema });
     }
 });
 
+// Generate authentication scaffold using Gemini (Returns template markdown string safely)
 app.post('/api/generate-auth', async (req, res) => {
     const { projectContext } = req.body || {};
     if (!genAI) {
+        console.warn('Generative SDK not initialized; returning fallback auth scaffold.');
         const auth = fallbackGenerateAuth(projectContext || '');
         return res.json({ auth, fallback: true });
     }
@@ -399,81 +477,134 @@ app.post('/api/generate-auth', async (req, res) => {
         const promptParts = [{
             text: `Please produce a concise authentication scaffold for a Node.js + Express application using MongoDB for user storage and JWT for sessions. Include example routes, data model, and a brief explanation. Reply with code snippets and minimal text. Context:\n\n${projectContext || '(no project context provided)'}`
         }];
+
         const result = await model.generateContent({ contents: [{ role: 'user', parts: promptParts }], generationConfig: { responseMimeType: 'text/plain' } });
-        return res.json({ auth: result.response.text() });
+        const text = result.response.text();
+        return res.json({ auth: text });
+
     } catch (error) {
         const fallbackAuth = fallbackGenerateAuth(projectContext || '');
         return handleGeminiError(error, res, { auth: fallbackAuth });
     }
 });
 
+// ============================================================================
+// 🗄️ DATABASE ARCHITECT ROUTE FOR MONGOOSE SCHEMAS GENERATOR (SAFE MODE)
+// ============================================================================
 app.post('/api/ai/schema-builder', async (req, res) => {
     try {
         const { entityName, description, fields, targetFile, selectedModel } = req.body || {};
-        if (!entityName) return res.status(400).json({ error: 'entityName is required' });
+
+        if (!entityName) {
+            return res.status(400).json({ error: 'entityName is required' });
+        }
 
         const fileName = targetFile || `${entityName.toLowerCase()}Schema`;
         const finalFileName = fileName.endsWith('.js') ? fileName : `${fileName}.js`;
+        let generatedCode = '';
+
         const targetModel = selectedModel ? `models/${selectedModel.replace(/^models\//, '')}` : 'models/gemini-1.5-flash';
+
         const fallbackTemplate = `import mongoose from 'mongoose';\n\nconst ${entityName}Schema = new mongoose.Schema({\n  name: { type: String, required: true, index: true },\n  description: { type: String, default: "${(description || '').replace(/"/g, '\\"')}" },\n  status: { type: String, default: 'active' },\n  createdAt: { type: Date, default: Date.now },\n  updatedAt: { type: Date, default: Date.now }\n}, { timestamps: true });\n\n${entityName}Schema.index({ createdAt: -1 });\nexport const ${entityName} = mongoose.model('${entityName}', ${entityName}Schema);\n`;
 
-        if (!genAI) return res.json({ success: true, filePath: `models/${finalFileName}`, code: fallbackTemplate, fallback: true });
+        if (!genAI) {
+            console.warn('⚠️ Generative SDK not initialized; returning static blueprint schema.');
+            return res.json({ success: true, filePath: `models/${finalFileName}`, code: fallbackTemplate, fallback: true });
+        }
 
         try {
+            console.log(`🤖 [Schema Builder] Generating secure schema model layout via target channel: ${targetModel}`);
             const modelInstance = genAI.getGenerativeModel({ model: targetModel });
+            
             const prompt = `You are a Senior Backend Architect. Generate a high-performance production-ready Mongoose Schema in JavaScript (ESM format, using "import mongoose from 'mongoose'") for the entity "${entityName}" based on these fields: ${JSON.stringify(fields || {})} and description: "${description || ''}". Ensure it includes validation rules, relationships, index definitions, timestamps, and is fully commented. CRITICAL: Return ONLY the executable JavaScript code. Do NOT wrap it in markdown code blocks.`;
-            const result = await modelInstance.generateContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'text/plain' } });
+
+            const result = await modelInstance.generateContent({
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                generationConfig: { responseMimeType: 'text/plain' }
+            });
 
             let rawCode = result.response.text().trim();
             if (rawCode.startsWith('```')) {
                 rawCode = rawCode.replace(/^```[a-zA-Z0-9]*\n/, '').replace(/\n```$/, '');
             }
-            return res.json({ success: true, filePath: `models/${finalFileName}`, code: rawCode.trim() });
+            generatedCode = rawCode.trim();
+
+            return res.json({ success: true, filePath: `models/${finalFileName}`, code: generatedCode });
+
         } catch (error) {
+            console.error('❌ Gemini Schema Builder Engine crashed:', error);
             return res.json({ success: true, filePath: `models/${finalFileName}`, code: fallbackTemplate, fallback: true });
         }
     } catch (fatalErr) {
+        console.error('❌ Fatal error in schema builder route layer:', fatalErr);
         return res.status(500).json({ error: 'Internal schema runtime server crash.' });
     }
 });
 
+// ============================================================================
+// 🔐 AUTOMATED AUTHENTICATION SUBSYSTEM SCAFFOLD ROUTE (SAFE MODE)
+// ============================================================================
 app.post('/api/ai/auth-scaffold', async (req, res) => {
     try {
         const { projectContext, selectedModel } = req.body || {};
         const resendKey = process.env.RESEND_API_KEY || 're_sandbox_key';
+        let generatedAuthCode = '';
+
         const targetModel = selectedModel ? `models/${selectedModel.replace(/^models\//, '')}` : 'models/gemini-1.5-flash';
+
         const fallbackTemplate = `import express from 'express';\nimport bcrypt from 'bcryptjs';\nimport jwt from 'jsonwebtoken';\nimport { Resend } from 'resend';\n\nconst router = express.Router();\nconst resend = new Resend('${resendKey}');\nconst JWT_SECRET = process.env.JWT_SECRET || 'k-studio-super-secret-key';\n\nrouter.post('/signup', async (req, res) => { try { const { email, password } = req.body; if (!email || !password) return res.status(400).json({ error: 'Required fields missing' }); const salt = await bcrypt.genSalt(10); const hashedPassword = await bcrypt.hash(password, salt); res.status(201).json({ success: true }); } catch (err) { res.status(500).json({ error: err.message }); } });\nexport default router;`;
 
-        if (!genAI) return res.json({ auth: fallbackTemplate, fallback: true });
+        if (!genAI) {
+            return res.json({ auth: fallbackTemplate, fallback: true });
+        }
 
         try {
+            console.log(`🤖 [Auth Scaffold] Compiling secure scaffold layout via target channel: ${targetModel}`);
             const modelInstance = genAI.getGenerativeModel({ model: targetModel });
+            
             const prompt = `You are a Senior Security Engineer. Generate a full, complete Express.js route file (ESM format) for Authentication inside K-Studio. Requirements: POST routes for /signup and /login, bcryptjs hashing, jsonwebtoken signing, and Resend client initialized with: "${resendKey}". CRITICAL: Return ONLY clean executable code without markdown fences.`;
-            const result = await modelInstance.generateContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'text/plain' } });
+
+            const result = await modelInstance.generateContent({
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                generationConfig: { responseMimeType: 'text/plain' }
+            });
 
             let rawCode = result.response.text().trim();
             if (rawCode.startsWith('```')) {
                 rawCode = rawCode.replace(/^```[a-zA-Z0-9]*\n/, '').replace(/\n```$/, '');
             }
-            return res.json({ auth: rawCode.trim() });
+            generatedAuthCode = rawCode.trim();
+
+            return res.json({ auth: generatedAuthCode });
+
         } catch (error) {
+            console.error('❌ Gemini Auth Scaffold Engine crashed:', error);
             return res.json({ auth: fallbackTemplate, fallback: true });
         }
     } catch (fatalErr) {
+        console.error('❌ Fatal error in auth scaffold route layer:', fatalErr);
         return res.status(500).json({ error: 'Internal orchestration server crash.' });
     }
 });
 
+// Secure Multi-Agent Multi-Turn Automation Route (with Kaif Dev Agency Persona overlay)
 app.post('/api/ai/execute-automation', async (req, res) => {
     try {
         const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) return res.status(503).json({ error: 'GEMINI_API_KEY not configured' });
+        if (!apiKey) {
+            return res.status(503).json({ error: 'GEMINI_API_KEY not configured in backend environment runtime matrix' });
+        }
 
         const { prompt, history, projectContext } = req.body || {};
-        if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
+        if (!prompt) {
+            return res.status(400).json({ error: 'Prompt is required for execute-automation' });
+        }
+
+        console.log(`🤖 [Execute Automation] Multi-agent loop initiated with prompt: "${prompt}"`);
 
         const tempGenAI = new GoogleGenerativeAI(apiKey);
         const model = tempGenAI.getGenerativeModel({ model: "models/gemini-2.0-flash" });
+
         const chatHistory = (history || []).map(m => ({
             role: m.role === 'user' ? 'user' : 'model',
             parts: [{ text: m.parts?.[0]?.text || m.content || String(m) }]
@@ -481,104 +612,356 @@ app.post('/api/ai/execute-automation', async (req, res) => {
 
         const chat = model.startChat({
             history: chatHistory,
-            systemInstruction: "You are the VSCodium core workbench executor loop..."
+            systemInstruction: "You are the VSCodium core workbench executor loop, a high-performance automation agent (Antigravity & Codec System) designed to seamlessly generate multi-turn code improvements, database migrations, and authentication flows."
         });
 
-        const result = await chat.sendMessage(`PROJECT CONTEXT:\n${projectContext || 'None'}\n\nAUTOMATION TASK: ${prompt}`);
-        return res.json({ success: true, output: result.response.text(), message: "Automation loop executed successfully" });
+        const fullPrompt = `PROJECT CONTEXT:\n${projectContext || 'None'}\n\nAUTOMATION TASK: ${prompt}`;
+        const result = await chat.sendMessage(fullPrompt);
+        const text = (await result.response).text();
+
+        return res.json({
+            success: true,
+            output: text,
+            message: "Automation loop executed successfully"
+        });
+
     } catch (error) {
+        console.error("❌ Execute Automation Failed:", error);
         if (isQuotaError(error)) {
-            return res.json({ success: true, output: `## Automation Blueprint Output (Fallback Activated)`, fallback: true });
+            const fallbackOutput = `## Automation Blueprint Output (Fallback Activated)\n\nAPI quota limits hit. Structure fallback rendered smoothly.`;
+            return res.json({
+                success: true,
+                output: fallbackOutput,
+                message: "Fallback blueprint successfully rendered (Quota Guard active)",
+                fallback: true
+            });
         }
-        return res.status(500).json({ error: "Execute Automation Failed", details: error.message });
+        return res.status(500).json({
+            error: "Execute Automation Failed",
+            details: error && error.message ? error.message : String(error)
+        });
     }
 });
 
+// 4. Autonomous Project Detection
 app.post('/api/detect-project', (req, res) => {
     const { folderName, files } = req.body;
+    console.log(`🔍 [Detect] Request for: ${folderName}`);
     const projectContext = req.body && req.body.projectContext ? req.body.projectContext : null;
 
     let port = projectPortMap.has(folderName) ? projectPortMap.get(folderName) : nextAvailablePort++;
     projectPortMap.set(folderName, port);
 
     const projectPath = resolveProjectDirectory(folderName);
-    let type = 'static'; let framework = 'vanilla';
+    console.log(`   - Resolved Path: ${projectPath}`);
+
+    let type = 'static';
+    let framework = 'vanilla';
 
     try {
         const pkgPath = path.join(projectPath, 'package.json');
+
         if (fs.existsSync(pkgPath)) {
             const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
             const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-            if (deps['next']) { type = 'next'; framework = 'nextjs'; }
-            else if (deps['vite'] || deps['@tailwindcss/vite']) { type = 'vite'; framework = 'vite'; }
-            else { type = 'node'; framework = 'nodejs'; }
-        }
-    } catch (e) { /* ignore */ }
 
+            if (deps['next']) {
+                type = 'next'; framework = 'nextjs';
+            } else if (deps['vite'] || deps['@tailwindcss/vite'] || deps['@vitejs/plugin-react']) {
+                type = 'vite'; framework = 'vite';
+            } else if (deps['react-scripts']) {
+                type = 'cra'; framework = 'react';
+            } else if (deps['@remix-run/dev']) {
+                type = 'remix'; framework = 'remix';
+            } else {
+                type = 'node'; framework = 'nodejs';
+            }
+        }
+        else if (files && Array.isArray(files) && files.length > 0) {
+            const lowerFiles = files.map(f => f.toLowerCase());
+            if (lowerFiles.some(f => f.includes('next.config'))) {
+                type = 'next'; framework = 'nextjs';
+            } else if (lowerFiles.some(f => f.includes('vite.config'))) {
+                type = 'vite'; framework = 'vite';
+            } else if (lowerFiles.some(f => f.includes('remix.config'))) {
+                type = 'remix'; framework = 'remix';
+            }
+        }
+        else if (projectContext && typeof projectContext === 'string' && projectContext.length > 0) {
+            const ctx = projectContext.toLowerCase();
+
+            if (ctx.includes('next/link') || ctx.includes('next/router') || ctx.includes('next.config.js') || ctx.includes('next.config.mjs')) {
+                type = 'next'; framework = 'nextjs';
+            }
+            else if (ctx.includes('vite.config.ts') || ctx.includes('vite.config.js') || ctx.includes('import { defineConfig } from \'vite\'') || ctx.includes('defineconfig({')) {
+                type = 'vite'; framework = 'vite';
+            }
+            else if (ctx.includes('react-scripts') || ctx.includes('create-react-app')) {
+                type = 'cra'; framework = 'react';
+            }
+            else if (ctx.includes('@remix-run/')) {
+                type = 'remix'; framework = 'remix';
+            }
+            else if (ctx.includes('package.json')) {
+                try {
+                    const match = projectContext.match(/\{[\s\S]*?\}/);
+                    if (match) {
+                        const pkg = JSON.parse(match[0]);
+                        const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+                        if (deps && deps['next']) {
+                            type = 'next'; framework = 'nextjs';
+                        } else if (deps && deps['vite']) {
+                            type = 'vite'; framework = 'vite';
+                        } else if (deps && deps['react-scripts']) {
+                            type = 'cra'; framework = 'react';
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            }
+            else {
+                const extCount = (projectContext.match(/\.tsx|\.jsx|import\s+React|from\s+'react'/g) || []).length;
+                if (extCount > 3) {
+                    type = 'node'; framework = 'nodejs';
+                }
+            }
+        }
+    } catch (e) {
+        console.error(`   - Error during detection: ${e && e.message ? e.message : e}`);
+    }
+
+    console.log(`   - Detected: ${type} (${framework}), Port: ${port}`);
     return res.json({ type, framework, port });
 });
 
+// ============================================================================
+// 5. AUTONOMOUS PROJECT EXECUTION WITH ROBUST PORT CLEANUP
+// ============================================================================
 app.post('/api/run-project', async (req, res) => {
     const { projectName, projectType, port } = req.body;
+    console.log(`🚀 [Run] Project: ${projectName}, Type: ${projectType}, Port: ${port}`);
+
     const projectPath = resolveProjectDirectory(projectName);
+    console.log(`   - Working Directory: ${projectPath}`);
 
     if (activeProcesses.has(projectName) || activeStaticServers.has(projectName)) {
+        console.log(`   - Cleaning up previous instance of ${projectName}...`);
         stopProjectLogic(projectName);
     }
 
     const isWin = process.platform === 'win32';
+
+    // 🚨 CRITICAL GLOBAL FIX: Static ho ya dynamic, launching se PEHLE port har haal mein saaf karo!
+    console.log(`🧹 [Port Cleanup] Clearing any zombie process on port ${port}...`);
     try {
         const { execSync } = await import('child_process');
-        if (isWin) execSync(`npx kill-port ${port}`);
-        else execSync(`lsof -t -i:${port} | xargs kill -9`);
-    } catch (portErr) { /* port free */ }
-
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    if (projectType === 'static') {
-        const staticApp = express();
-        staticApp.use(express.static(projectPath));
-        const server = staticApp.listen(port, () => console.log(`✅ Static server running safely on port ${port}`));
-        activeStaticServers.set(projectName, { server, port });
-        return res.json({ status: 'ready', url: `http://localhost:${port}` });
+        if (isWin) {
+            execSync(`npx kill-port ${port}`);
+        } else {
+            execSync(`lsof -t -i:${port} | xargs kill -9`);
+        }
+        console.log(`✅ Port ${port} successfully cleared and recycled.`);
+    } catch (portErr) {
+        console.log(`ℹ️ Port ${port} is already free and available.`);
     }
 
-    let command = isWin ? 'npm.cmd' : 'npm';
-    let args = ['run', 'dev'];
-    let env = { ...process.env, PORT: port.toString(), HOST: '127.0.0.1' };
+    // OS ko sockets completely recycle karne ke liye tiny delay do
+    await new Promise(resolve => setTimeout(resolve, 500));
 
-    if (projectType === 'next') args = ['run', 'dev', '--', '-p', port.toString()];
-    else if (projectType === 'vite') args = ['run', 'dev', '--', '--port', port.toString(), '--strictPort'];
+    try {
+        // Static app structure injection
+        if (projectType === 'static') {
+            try {
+                const staticApp = express();
+                staticApp.use(express.static(projectPath));
+                
+                // Secure listen block to catch EADDRINUSE safely
+                const server = staticApp.listen(port, () => {
+                    console.log(`✅ Static server running safely on port ${port}`);
+                });
+                
+                activeStaticServers.set(projectName, { server, port });
+                return res.json({ status: 'ready', url: `http://localhost:${port}` });
+            } catch (staticListenErr) {
+                console.error(`❌ Static compilation listen failed on port ${port}:`, staticListenErr);
+                return res.status(500).json({ error: "Port block collapse", details: staticListenErr.message });
+            }
+        }
 
-    const child = spawn(command, args, { cwd: projectPath, env, shell: isWin });
-    activeProcesses.set(projectName, child);
+        // --- Baki ka code (node_modules check aur spawning) bilkul same rahega ---
+        const nodeModulesPath = path.join(projectPath, 'node_modules');
+        const packageJsonPath = path.join(projectPath, 'package.json');
 
-    const isReady = await checkPortReady(port, projectType === 'next' ? 60 : 30);
-    return res.json({ status: isReady ? 'ready' : 'starting', url: `http://localhost:${port}` });
+        if (!fs.existsSync(nodeModulesPath)) {
+            console.warn(`   - ⚠️ node_modules missing for: ${projectName}`);
+            if (fs.existsSync(packageJsonPath)) {
+                return res.json({ status: 'needs_install', message: "Missing node_modules. Please run 'npm install'.", projectPath });
+            } else {
+                return res.json({ status: 'needs_install', message: `Not a valid Node project (no package.json found).`, projectPath });
+            }
+        }
+
+        let command = isWin ? 'npm.cmd' : 'npm';
+        let args = ['run', 'dev'];
+        let env = {
+            ...process.env,
+            PORT: port.toString(),
+            VITE_PORT: port.toString(),
+            HOST: '127.0.0.1',
+            BROWSER: 'none',
+            NODE_ENV: 'development',
+            FORCE_COLOR: '1'
+        };
+
+        if (projectType === 'next') {
+            args = ['run', 'dev', '--', '-p', port.toString()];
+        } else if (projectType === 'vite' || fs.existsSync(path.join(projectPath, 'vite.config.ts')) || fs.existsSync(path.join(projectPath, 'vite.config.js'))) {
+            args = ['run', 'dev', '--', '--port', port.toString(), '--strictPort'];
+        }
+
+        console.log(`   - Spawning Local Engine Process: ${command} ${args.join(' ')}`);
+        const child = spawn(command, args, { cwd: projectPath, env, shell: isWin });
+
+        child.stdout.on('data', (d) => console.log(`[${projectName}:stdout] ${d.toString().trim()}`));
+        child.stderr.on('data', (d) => console.error(`[${projectName}:stderr] ${d.toString().trim()}`));
+
+        activeProcesses.set(projectName, child);
+
+        child.on('exit', (code, signal) => {
+            console.log(`[${projectName}] child exited with code=${code} signal=${signal}`);
+            if (activeProcesses.has(projectName)) activeProcesses.delete(projectName);
+        });
+
+        const isReady = await checkPortReady(port, projectType === 'next' ? 60 : 30);
+        return res.json({ status: isReady ? 'ready' : 'starting', url: `http://localhost:${port}` });
+
+    } catch (error) {
+        console.error(`   - ❌ Execution Error: ${error.message}`);
+        return res.status(500).json({ error: "Failed to run", details: error.message });
+    }
 });
 
+// Setup stop projects route safely
 app.post('/api/stop-project', (req, res) => {
     const { projectName } = req.body;
     const stopped = stopProjectLogic(projectName);
     return res.json({ success: stopped, message: stopped ? `Stopped ${projectName}` : "No active process found" });
 });
 
-// Wildcard Fallback Rule (Fixed standard Express layout naming)
+// Wildcard Fallback Rule for SPA Routing (Cleaned up asterisk conflict)
 app.get('*', (req, res) => {
     const indexPath = path.join(distPath, 'index.html');
     if (fs.existsSync(indexPath)) {
-        res.sendFile(indexPath);
+        return res.sendFile(indexPath);
     } else {
-        res.status(404).send('Frontend static assets are not compiled.');
+        return res.status(404).send('Frontend static assets are not compiled.');
     }
 });
 
-const SERVER_PORT = process.env.SERVER_PORT ? parseInt(process.env.SERVER_PORT, 10) : 8080;
+const SERVER_PORT = process.env.VSCODE_PORT ? parseInt(process.env.VSCODE_PORT, 10) : (process.env.SERVER_PORT ? parseInt(process.env.SERVER_PORT, 10) : 8080);
 const httpServer = http.createServer(app);
+
+httpServer.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${SERVER_PORT} already in use (EADDRINUSE).`);
+        process.exit(1);
+    }
+});
 
 if (process.env.DISABLE_AUTO_LISTEN !== '1') {
     httpServer.listen(SERVER_PORT, () => console.log(`Backend Online: Port ${SERVER_PORT}`));
 }
+
+// Real-Time Terminal Output Streaming (SSE)
+app.get('/api/terminal/stream', (req, res) => {
+    try {
+        const { command } = req.query;
+        if (!command) return res.status(400).json({ error: 'Command is required' });
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        const child = spawn(command, [], { cwd: workspaceRoot, env: { ...process.env, FORCE_COLOR: '1' }, shell: true });
+
+        child.stdout.on('data', (data) => res.write(`data: ${JSON.stringify({ type: 'output', text: data.toString() })}\n\n`));
+        child.stderr.on('data', (data) => res.write(`data: ${JSON.stringify({ type: 'output', text: data.toString() })}\n\n`));
+        child.on('error', (err) => res.write(`data: ${JSON.stringify({ type: 'error', text: `\nError: ${err.message}` })}\n\n`));
+
+        const timeout = setTimeout(() => {
+            child.kill('SIGKILL');
+        }, 60000);
+
+        child.on('close', (code) => {
+            clearTimeout(timeout);
+            res.write(`data: ${JSON.stringify({ type: 'exit', code })}\n\n`);
+            return res.end();
+        });
+    } catch (err) {
+        res.write(`data: ${JSON.stringify({ type: 'error', text: `\nFatal: ${err.message}` })}\n\n`);
+        return res.end();
+    }
+});
+
+// Local Interactive Shell Terminal Execution
+app.post('/api/terminal/execute', async (req, res) => {
+    try {
+        const { command } = req.body || {};
+        if (!command) return res.status(400).json({ error: 'Command is required' });
+
+        const child = spawn(command, [], { cwd: workspaceRoot, env: { ...process.env, FORCE_COLOR: '1' }, shell: true });
+
+        let output = '';
+        child.stdout.on('data', (data) => output += data.toString());
+        child.stderr.on('data', (data) => output += data.toString());
+
+        const timeout = setTimeout(() => {
+            child.kill('SIGKILL');
+            output += '\nError: Execution timeout reached.';
+        }, 15000);
+
+        child.on('close', (code) => {
+            clearTimeout(timeout);
+            return res.json({ success: code === 0, output: output || `Exit code ${code}`, exitCode: code });
+        });
+    } catch (err) {
+        return res.status(500).json({ error: 'Terminal Execution Failed', details: err.message });
+    }
+});
+
+// Debug endpoint to check runtime state without causing side-effects
+app.get('/api/debug', (req, res) => {
+    return res.json({
+        uptime: process.uptime(),
+        pid: process.pid,
+        genAIInitialized: !!genAI,
+        activeProcesses: Array.from(activeProcesses.keys()),
+        activeStaticServers: Array.from(activeStaticServers.keys()),
+        envLoaded: !!process.env.GEMINI_API_KEY
+    });
+});
+
+const gracefulShutdown = async (signal) => {
+    console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+    try {
+        for (const [name, child] of activeProcesses.entries()) {
+            child.kill('SIGINT');
+        }
+        for (const [name, entry] of activeStaticServers.entries()) {
+            entry.server.close();
+        }
+        if (httpServer && typeof httpServer.close === 'function') {
+            httpServer.close(() => process.exit(0));
+            setTimeout(() => process.exit(1), 5000).unref();
+        } else {
+            process.exit(0);
+        }
+    } catch (e) {
+        process.exit(1);
+    }
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 export default app;
 export { app, httpServer, genAI, fallbackGenerateSchema, fallbackGenerateAuth };
