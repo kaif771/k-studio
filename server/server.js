@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, GoogleGenAICacheManager } from '@google/generative-ai';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -282,6 +283,9 @@ app.post('/api/workspace/sync-and-build', async (req, res) => {
     }
 });
 
+// ============================================================================
+// 📦 1. FIXED CACHE CODEBASE ENDPOINT (USING CORRECT CLASS)
+// ============================================================================
 app.post('/api/cache-codebase', async (req, res) => {
     try {
         if (!genAI) return res.status(503).json({ cacheName: null, message: 'Generative AI SDK not initialized' });
@@ -292,57 +296,43 @@ app.post('/api/cache-codebase', async (req, res) => {
         }
 
         try {
-            const model = "models/gemini-1.5-flash";
-            const cache = await genAI.getGenerativeModel({ model }).createCachedContent({
-                model,
+            const targetModel = "models/gemini-1.5-flash";
+            
+            // Sahi Google manager use karke cache create karo
+            const cacheManager = new GoogleGenAICacheManager(process.env.GEMINI_API_KEY);
+            const cache = await cacheManager.create({
+                model: targetModel,
                 displayName: "Gemini_Architect_Context",
-                systemInstruction: "You are a Senior Architect.",
-                contents: [{ role: "user", parts: [{ text: projectFiles }] }],
                 ttlSeconds: 3600,
+                contents: [{ role: "user", parts: [{ text: projectFiles }] }],
             });
-            console.log("Cache created successfully:", cache.name);
+
+            console.log("🚀 Cache created successfully via Manager:", cache.name);
             return res.json({ cacheName: cache.name });
         } catch (cacheError) {
-            console.warn("Caching not available or failed:", cacheError.message);
-            return res.json({ cacheName: null, message: "Caching unavailable, will use direct API calls" });
+            console.warn("⚠️ Caching bypassed, switching to direct API calls:", cacheError.message);
+            // Agar cache fail ho, toh cleanly null bhejo bina crash kiye
+            return res.json({ cacheName: null, message: "Caching unavailable" });
         }
     } catch (error) {
         console.error("Cache endpoint error:", error);
-        return res.status(500).json({ error: "Caching failed", details: error.message });
+        return res.json({ cacheName: null, details: error.message }); // 100% safe safety fallback
     }
 });
 
-app.post('/api/architect', async (req, res) => {
-    try {
-        if (!genAI) return res.status(503).json({ error: 'Generative AI SDK not initialized' });
-        const { prompt, projectContext, image, cacheName, selectedModel } = req.body;
-        
-        const targetModel = selectedModel ? `models/${selectedModel.replace(/^models\//, '')}` : "models/gemini-2.0-flash";
-        const model = genAI.getGenerativeModel({ model: targetModel, cachedContent: cacheName || undefined });
-        
-        let parts = [{ text: `CONTEXT:\n${projectContext}\n\nUSER REQUEST: ${prompt}` }];
-        if (image) {
-            const base64Data = image.split(',')[1] || image;
-            parts.push({ inlineData: { data: base64Data, mimeType: 'image/png' } });
-        }
-        
-        const result = await model.generateContent({ contents: [{ role: "user", parts }], generationConfig: { responseMimeType: "application/json" } });
-        return res.json(JSON.parse(result.response.text()));
-    } catch (error) {
-        return handleGeminiError(error, res);
-    }
-});
-
+// ============================================================================
+// 🤖 2. CRASH-PROOF AI CHAT ENDPOINT (CACHE EVALUATION GUARD LAGA DIYA)
+// ============================================================================
 app.post('/api/chat', async (req, res) => {
     try {
         if (!genAI) return res.status(503).json({ error: 'Generative AI SDK not initialized' });
-        const { message, history, projectContext, model: requestedModel } = req.body;
+        
+        const { message, history, projectContext, model: requestedModel, cacheName } = req.body;
 
         const modelFallbackStack = [
             requestedModel ? `models/${requestedModel.replace(/^models\//, '')}` : "models/gemini-1.5-flash", 
             "models/gemini-1.5-flash",
-            "models/gemini-2.0-flash",
-            "models/gemini-1.5-pro"
+            "models/gemini-2.0-flash"
         ];
 
         const baseSystemInstruction = `You are an advanced AI Code Editor Agent for K-Studio. Your job is to analyze the user's project context, look at any uploaded blueprints/images, and output production-ready code blocks. 
@@ -359,10 +349,15 @@ CRITICAL: You must always explicitly label code blocks with the exact target fil
             if (isExecuted) break;
             try {
                 console.log(`🤖 [AI Engine] Dispatching request payload to target branch: ${modelIdentifier}`);
-                const modelInstance = genAI.getGenerativeModel({ 
-                    model: modelIdentifier,
-                    systemInstruction: fullSystemInstruction
-                });
+                
+                // CRITICAL SAFE GUARD: Agar cacheName real me valid string hai tabhi attach karo, varna normal direct call chalao
+                const modelOptions = { model: modelIdentifier, systemInstruction: fullSystemInstruction };
+                if (cacheName && typeof cacheName === 'string' && cacheName.startsWith('cachedContents/')) {
+                    modelOptions.cachedContent = cacheName;
+                    console.log(`⚡ Using active serverless context cache token: ${cacheName}`);
+                }
+
+                const modelInstance = genAI.getGenerativeModel(modelOptions);
 
                 const chatSession = modelInstance.startChat({ history: history || [] });
                 const result = await chatSession.sendMessage(message);
@@ -372,7 +367,7 @@ CRITICAL: You must always explicitly label code blocks with the exact target fil
                 console.log(`✅ [AI Engine] Content compiled successfully via channel: ${modelIdentifier}`);
                 break;
             } catch (layerError) {
-                console.warn(`⚠️ [AI Engine Fallback Loop] Target vector ${modelIdentifier} bypassed or rate-limited.`);
+                console.warn(`⚠️ [AI Engine Fallback Loop] Target vector ${modelIdentifier} failed:`, layerError.message);
             }
         }
 
@@ -381,11 +376,13 @@ CRITICAL: You must always explicitly label code blocks with the exact target fil
         } else {
             throw new Error("All generative orchestration instances on the cluster pool are currently exhausted.");
         }
+
     } catch (error) {
         console.error("❌ Fatal Error in client context core chat endpoint:", error);
-        return res.status(500).json({ error: error.message || "Internal core structural matrix compilation failure." });
+        return res.status(500).json({ error: error.message || "Internal core structural matrix failure." });
     }
 });
+
 
 app.post('/api/generate-mongo-schema', async (req, res) => {
     const { projectContext } = req.body || {};
