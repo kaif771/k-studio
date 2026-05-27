@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { GoogleGenerativeAI, GoogleGenAICacheManager } from '@google/generative-ai';
+import { GoogleGenAICacheManager } from '@google/generative-ai';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
