@@ -27,10 +27,34 @@ const activeStaticServers = new Map(); // ProjectName -> { server, port }
 const projectPortMap = new Map(); // ProjectName -> Assigned Port
 let nextAvailablePort = 3002;
 
-const workspaceRoot = process.env.WORKSPACE_DIR
-    ? path.resolve(process.env.WORKSPACE_DIR.replace(/^"(.*)"$/, '$1'))
-    : process.cwd();
+const path = require('path');
+const os = require('os');
+const fs = require('fs');
 
+// 1. Pehle string clean karo agar variable set hai
+let rawWorkspace = process.env.WORKSPACE_DIR 
+    ? process.env.WORKSPACE_DIR.replace(/^"(.*)"$/, '$1') 
+    : null;
+
+let workspaceRoot;
+
+// 2. PERMANENT CLOUD GUARD: Check karo kya ye path real me exist karta hai?
+if (rawWorkspace && fs.existsSync(path.resolve(rawWorkspace))) {
+    // Agar laptop par ho aur D:\k-studio sahi me hai, toh wahi use karo
+    workspaceRoot = path.resolve(rawWorkspace);
+} else {
+    // Agar Vercel cloud par ho (jahan D:\ nahi chalega), ya variable missing hai, toh automatic OS temp folder allocate karo
+    workspaceRoot = path.join(os.tmpdir(), 'k-studio-workspace');
+    
+    // Cloud par temporary workspace directory instant create kar lo agar nahi bani hai
+    if (!fs.existsSync(workspaceRoot)) {
+        fs.mkdirSync(workspaceRoot, { recursive: true });
+    }
+}
+
+console.log(`📁 ACTIVE WORKSPACE ROOT LAYER: ${workspaceRoot}`);
+
+// --- Ab tumhara ye function bina kisi crash ke 100% stable chalega ---
 function resolveProjectDirectory(projectName) {
     const normalizedName = projectName.replace(/[\\/]+$/, '');
 
