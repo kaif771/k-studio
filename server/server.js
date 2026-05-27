@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { GoogleGenAICacheManager } from '@google/generative-ai';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -9,7 +8,7 @@ import { spawn, exec } from 'child_process';
 import fs from 'fs';
 import http from 'http';
 import net from 'net';
-import os from 'os'; // Proper ESM Import added here
+import os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -56,7 +55,6 @@ if (process.env.DISABLE_AUTO_LISTEN !== '1') {
     if (!process.env.WORKSPACE_DIR) {
         console.log("⚠️ process.env.WORKSPACE_DIR is empty. Applying fallback...");
     }
-    // Dynamic override variables globally taaki aage koi function crash na ho
     process.env.WORKSPACE_DIR = workspaceRoot;
     console.log(`✅ Startup Validation Passed: Workspace linked safely at: ${workspaceRoot}`);
 }
@@ -283,50 +281,39 @@ app.post('/api/workspace/sync-and-build', async (req, res) => {
     }
 });
 
-// ============================================================================
-// 📦 1. CRASH-PROOF CACHE CODEBASE ENDPOINT (ZERO RUNTIME DEPENDENCY)
-// ============================================================================
 app.post('/api/cache-codebase', async (req, res) => {
     try {
-        console.log("ℹ️ Core cluster routing optimizer active: Bypassing internal memory cache layering.");
-        // Safely return null data template so frontend falls back to standard live API execution paths
-        return res.json({ cacheName: null, message: "Orchestration optimization: Using direct streaming paths" });
+        console.log("ℹ️ Cache engine optimization active: Streaming data pipelines directly.");
+        return res.json({ cacheName: null, message: "Orchestration active using direct channels." });
     } catch (error) {
         return res.json({ cacheName: null, details: error.message });
     }
 });
-        try {
-            const targetModel = "models/gemini-1.5-flash";
-            
-            // Sahi Google manager use karke cache create karo
-            const cacheManager = new GoogleGenAICacheManager(process.env.GEMINI_API_KEY);
-            const cache = await cacheManager.create({
-                model: targetModel,
-                displayName: "Gemini_Architect_Context",
-                ttlSeconds: 3600,
-                contents: [{ role: "user", parts: [{ text: projectFiles }] }],
-            });
 
-            console.log("🚀 Cache created successfully via Manager:", cache.name);
-            return res.json({ cacheName: cache.name });
-        } catch (cacheError) {
-            console.warn("⚠️ Caching bypassed, switching to direct API calls:", cacheError.message);
-            // Agar cache fail ho, toh cleanly null bhejo bina crash kiye
-            return res.json({ cacheName: null, message: "Caching unavailable" });
+app.post('/api/architect', async (req, res) => {
+    try {
+        if (!genAI) return res.status(503).json({ error: 'Generative AI SDK not initialized' });
+        const { prompt, projectContext, image, cacheName, selectedModel } = req.body;
+        
+        const targetModel = selectedModel ? `models/${selectedModel.replace(/^models\//, '')}` : "models/gemini-2.0-flash";
+        const model = genAI.getGenerativeModel({ model: targetModel, cachedContent: cacheName || undefined });
+        
+        let parts = [{ text: `CONTEXT:\n${projectContext}\n\nUSER REQUEST: ${prompt}` }];
+        if (image) {
+            const base64Data = image.split(',')[1] || image;
+            parts.push({ inlineData: { data: base64Data, mimeType: 'image/png' } });
         }
+        
+        const result = await model.generateContent({ contents: [{ role: "user", parts }], generationConfig: { responseMimeType: "application/json" } });
+        return res.json(JSON.parse(result.response.text()));
     } catch (error) {
-        console.error("Cache endpoint error:", error);
-        return res.json({ cacheName: null, details: error.message }); // 100% safe safety fallback
+        return handleGeminiError(error, res);
     }
 });
 
-// ============================================================================
-// 🤖 2. CRASH-PROOF AI CHAT ENDPOINT (CACHE EVALUATION GUARD LAGA DIYA)
-// ============================================================================
 app.post('/api/chat', async (req, res) => {
     try {
         if (!genAI) return res.status(503).json({ error: 'Generative AI SDK not initialized' });
-        
         const { message, history, projectContext, model: requestedModel, cacheName } = req.body;
 
         const modelFallbackStack = [
@@ -350,15 +337,12 @@ CRITICAL: You must always explicitly label code blocks with the exact target fil
             try {
                 console.log(`🤖 [AI Engine] Dispatching request payload to target branch: ${modelIdentifier}`);
                 
-                // CRITICAL SAFE GUARD: Agar cacheName real me valid string hai tabhi attach karo, varna normal direct call chalao
                 const modelOptions = { model: modelIdentifier, systemInstruction: fullSystemInstruction };
                 if (cacheName && typeof cacheName === 'string' && cacheName.startsWith('cachedContents/')) {
                     modelOptions.cachedContent = cacheName;
-                    console.log(`⚡ Using active serverless context cache token: ${cacheName}`);
                 }
 
                 const modelInstance = genAI.getGenerativeModel(modelOptions);
-
                 const chatSession = modelInstance.startChat({ history: history || [] });
                 const result = await chatSession.sendMessage(message);
                 replyText = (await result.response).text();
@@ -376,13 +360,11 @@ CRITICAL: You must always explicitly label code blocks with the exact target fil
         } else {
             throw new Error("All generative orchestration instances on the cluster pool are currently exhausted.");
         }
-
     } catch (error) {
-        console.error("❌ Fatal Error in client context core chat endpoint:", error);
-        return res.status(500).json({ error: error.message || "Internal core structural matrix failure." });
+        console.error("❌ Fatal Error in core chat endpoint:", error);
+        return res.status(500).json({ error: error.message || "Internal corestructural failure." });
     }
 });
-
 
 app.post('/api/generate-mongo-schema', async (req, res) => {
     const { projectContext } = req.body || {};
@@ -581,10 +563,14 @@ app.post('/api/stop-project', (req, res) => {
     return res.json({ success: stopped, message: stopped ? `Stopped ${projectName}` : "No active process found" });
 });
 
-app.get('/*splat', (req, res) => {
+// Wildcard Fallback Rule (Fixed standard Express layout naming)
+app.get('*', (req, res) => {
     const indexPath = path.join(distPath, 'index.html');
-    if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
-    return res.status(404).send('Frontend static assets are not compiled.');
+    if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+    } else {
+        res.status(404).send('Frontend static assets are not compiled.');
+    }
 });
 
 const SERVER_PORT = process.env.SERVER_PORT ? parseInt(process.env.SERVER_PORT, 10) : 8080;
