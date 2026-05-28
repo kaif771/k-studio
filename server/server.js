@@ -361,12 +361,14 @@ app.post('/api/chat', async (req, res) => {
         
         const { message, history, projectContext, model: requestedModel, cacheName } = req.body;
 
-        // ✅ UPDATED SAFE MODEL STRINGS (Bypasses 404 errors on v1beta channels)
+        // ✅ UPDATED SAFE MODEL STRINGS (Bypasses 404 errors and handles rate/quota 429 errors via deep fallbacks)
         const modelFallbackStack = [
             requestedModel ? requestedModel.replace(/^models\//, '') : "gemini-2.0-flash", 
             "gemini-2.0-flash",
-            "gemini-1.5-pro",
-            "gemini-1.5-flash"
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.0-flash-lite",
+            "gemini-2.5-flash-lite"
         ];
 
         const baseSystemInstruction = `You are the K-Studio Elite Autonomous Developer Subsystem (Antigravity & Codec Engine). 

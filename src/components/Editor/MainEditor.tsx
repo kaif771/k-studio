@@ -79,7 +79,7 @@ export const MainEditor: React.FC<MainEditorProps> = ({
 
     // Dynamic State Vectors for Hardware Accelerated Overlay aur Dual Switching Engine
     const [isChatDrawerOpen, setIsChatDrawerOpen] = useState(false);
-    const [aiModel, setAiModel] = useState<'gemini-1.5-flash' | 'gemini-3.1-pro-preview'>('gemini-1.5-flash');
+    const [aiModel, setAiModel] = useState<'gemini-2.0-flash' | 'gemini-2.5-pro'>('gemini-2.0-flash');
     const [finalUrl, setFinalUrl] = useState<string | null>(null);
 
     // Graphical Workspace Preferences Settings State (vscode.dev parity)
@@ -594,13 +594,12 @@ export const MainEditor: React.FC<MainEditorProps> = ({
                         </span>
                     </div>
 
-                    {/* Model Switcher Configuration Hub */}
                     <div className="flex items-center gap-1 bg-black/5 p-1 rounded-lg border border-black/5 mr-2">
                         <button
                             type="button"
-                            onClick={() => setAiModel('gemini-1.5-flash')}
+                            onClick={() => setAiModel('gemini-2.0-flash')}
                             className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold tracking-wider transition-all cursor-pointer ${
-                                aiModel === 'gemini-1.5-flash' 
+                                aiModel === 'gemini-2.0-flash' 
                                     ? 'bg-white text-neutral-900 shadow-xs' 
                                     : 'text-neutral-500 hover:text-neutral-900'
                             }`}
@@ -609,9 +608,9 @@ export const MainEditor: React.FC<MainEditorProps> = ({
                         </button>
                         <button
                             type="button"
-                            onClick={() => setAiModel('gemini-3.1-pro-preview')}
+                            onClick={() => setAiModel('gemini-2.5-pro')}
                             className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold tracking-wider transition-all cursor-pointer ${
-                                aiModel === 'gemini-3.1-pro-preview' 
+                                aiModel === 'gemini-2.5-pro' 
                                     ? 'bg-white text-neutral-900 shadow-xs' 
                                     : 'text-neutral-500 hover:text-neutral-900'
                             }`}
