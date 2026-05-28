@@ -29,7 +29,7 @@ process.on('unhandledRejection', (reason) => {
 const activeProcesses = new Map();
 const activeStaticServers = new Map(); // ProjectName -> { server, port }
 const projectPortMap = new Map(); // ProjectName -> Assigned Port
-let nextAvailablePort = 3002;
+let nextAvailablePort = 5100;
 
 // ============================================================================
 // 📁 PERMANENT CLOUD GUARD & WORKSPACE RESOLUTION (ESM SAFE)
@@ -644,6 +644,90 @@ app.post('/api/ai/execute-automation', async (req, res) => {
             error: "Execute Automation Failed",
             details: error && error.message ? error.message : String(error)
         });
+    }
+});
+
+// ============================================================================
+// 📁 SECURE FILE SYSTEM CRUD MUTATIONS API
+// ============================================================================
+app.post('/api/fs/create', async (req, res) => {
+    try {
+        const { path: targetPath, kind, projectName } = req.body || {};
+        if (!targetPath || typeof targetPath !== 'string' || !kind) {
+            return res.status(400).json({ error: 'path and kind are required' });
+        }
+        const projectPath = projectName ? resolveProjectDirectory(projectName) : workspaceRoot;
+        const safePath = normalizeWorkspaceTarget(targetPath, projectPath);
+        
+        if (kind === 'directory') {
+            await fs.promises.mkdir(safePath, { recursive: true });
+        } else {
+            await fs.promises.mkdir(path.dirname(safePath), { recursive: true });
+            await fs.promises.writeFile(safePath, '', 'utf8');
+        }
+        console.log(`📁 CRUD Create [${kind}]: ${safePath}`);
+        return res.json({ success: true });
+    } catch (error) {
+        console.error('❌ /api/fs/create failed:', error);
+        return res.status(500).json({ error: 'Create failed', details: error.message });
+    }
+});
+
+app.post('/api/fs/rename', async (req, res) => {
+    try {
+        const { oldPath, newPath, projectName } = req.body || {};
+        if (!oldPath || !newPath) {
+            return res.status(400).json({ error: 'oldPath and newPath are required' });
+        }
+        const projectPath = projectName ? resolveProjectDirectory(projectName) : workspaceRoot;
+        const safeOldPath = normalizeWorkspaceTarget(oldPath, projectPath);
+        const safeNewPath = normalizeWorkspaceTarget(newPath, projectPath);
+        
+        await fs.promises.rename(safeOldPath, safeNewPath);
+        console.log(`📁 CRUD Rename: ${safeOldPath} -> ${safeNewPath}`);
+        return res.json({ success: true });
+    } catch (error) {
+        console.error('❌ /api/fs/rename failed:', error);
+        return res.status(500).json({ error: 'Rename failed', details: error.message });
+    }
+});
+
+app.post('/api/fs/delete', async (req, res) => {
+    try {
+        const { path: targetPath, projectName } = req.body || {};
+        if (!targetPath) {
+            return res.status(400).json({ error: 'path is required' });
+        }
+        const projectPath = projectName ? resolveProjectDirectory(projectName) : workspaceRoot;
+        const safePath = normalizeWorkspaceTarget(targetPath, projectPath);
+        
+        await fs.promises.rm(safePath, { recursive: true, force: true });
+        console.log(`📁 CRUD Delete: ${safePath}`);
+        return res.json({ success: true });
+    } catch (error) {
+        console.error('❌ /api/fs/delete failed:', error);
+        return res.status(500).json({ error: 'Delete failed', details: error.message });
+    }
+});
+
+app.post('/api/fs/move', async (req, res) => {
+    try {
+        const { sourcePath, targetPath, projectName } = req.body || {};
+        if (!sourcePath || !targetPath) {
+            return res.status(400).json({ error: 'sourcePath and targetPath are required' });
+        }
+        const projectPath = projectName ? resolveProjectDirectory(projectName) : workspaceRoot;
+        const safeSourcePath = normalizeWorkspaceTarget(sourcePath, projectPath);
+        const safeTargetPath = normalizeWorkspaceTarget(targetPath, projectPath);
+        
+        // Ensure destination folder exists
+        await fs.promises.mkdir(path.dirname(safeTargetPath), { recursive: true });
+        await fs.promises.rename(safeSourcePath, safeTargetPath);
+        console.log(`📁 CRUD Move: ${safeSourcePath} -> ${safeTargetPath}`);
+        return res.json({ success: true });
+    } catch (error) {
+        console.error('❌ /api/fs/move failed:', error);
+        return res.status(500).json({ error: 'Move failed', details: error.message });
     }
 });
 

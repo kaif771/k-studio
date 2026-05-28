@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Paperclip, X, Sparkles, ArrowRight, FileCode, CheckCircle } from 'lucide-react';
+import { Send, Bot, User, Paperclip, X, Sparkles, FileCode, CheckCircle } from 'lucide-react';
 
 interface Message {
     id: string;
@@ -75,7 +75,7 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
             timestamp: new Date(),
         };
 
-        setMessages(prev => [...prev, userMessage]);
+        setMessages((prev: Message[]) => [...prev, userMessage]);
         const currentInput = input;
         const currentImage = selectedImage;
         
@@ -85,8 +85,8 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
 
         try {
             const historyToSend = messages
-                .filter((_, index) => index !== 0 || messages[0].role !== 'ai')
-                .map(m => ({
+                .filter((_: any, index: number) => index !== 0 || messages[0].role !== 'ai')
+                .map((m: Message) => ({
                     role: m.role === 'user' ? 'user' : 'model',
                     parts: [{ text: m.content }]
                 }));
@@ -114,7 +114,7 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
             const extractedFiles = extractFilesFromMarkdown(data.reply);
             if (extractedFiles.length > 0) {
                 console.log("[K-Studio Engine] Nayi files workspace queue me add ho gayi hain:", extractedFiles);
-                setPendingFiles(prev => [...prev, ...extractedFiles]);
+                setPendingFiles((prev: any[]) => [...prev, ...extractedFiles]);
             }
 
             const aiMessage: Message = {
@@ -124,7 +124,7 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
                 timestamp: new Date(),
             };
 
-            setMessages(prev => [...prev, aiMessage]);
+            setMessages((prev: Message[]) => [...prev, aiMessage]);
         } catch (error: any) {
             console.error("❌ Chat Dispatch Failure:", error);
             const errMsg = error?.message || 'Something went wrong during generation.';
@@ -134,7 +134,7 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
                 content: `Error: ${errMsg}`,
                 timestamp: new Date(),
             };
-            setMessages(prev => [...prev, errorMessage]);
+            setMessages((prev: Message[]) => [...prev, errorMessage]);
             
             setInput(currentInput);
             if (currentImage) setSelectedImage(currentImage);
@@ -205,7 +205,7 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
                     ref={scrollRef} 
                     className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 custom-scrollbar"
                 >
-                    {messages.map((msg) => (
+                    {messages.map((msg: Message) => (
                         <div 
                             key={msg.id} 
                             className={`flex gap-3.5 max-w-[92%] p-4 rounded-2xl border transition-all ${
@@ -343,7 +343,7 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
                     ref={scrollRef} 
                     className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 custom-scrollbar bg-neutral-50/20"
                 >
-                    {messages.map((msg) => (
+                    {messages.map((msg: Message) => (
                         <div 
                             key={msg.id} 
                             className={`flex gap-3.5 max-w-[92%] p-4 rounded-2xl border transition-all ${

@@ -29,8 +29,12 @@ export const MainEditor: React.FC<MainEditorProps> = ({
         toggleFolder,
         saveFile,
         createFile,
-        createFileAtPath,
-        refreshTree
+        createFolder,
+        renameNode,
+        deleteNode,
+        moveNode,
+        copyNode,
+        createFileAtPath
     } = useFileSystem(directoryHandle);
 
     const {
@@ -220,8 +224,8 @@ export const MainEditor: React.FC<MainEditorProps> = ({
         }
     }, [toggleFolder, openTab]);
 
-    const handleCreateFile = useCallback(async (fileName: string) => {
-        const handle = await createFile(fileName);
+    const handleCreateFile = useCallback(async (fileName: string, parentNode?: FileNode) => {
+        const handle = await createFile(fileName, parentNode);
         if (handle) {
             await openTab(fileName, handle, "");
         }
@@ -330,16 +334,38 @@ export const MainEditor: React.FC<MainEditorProps> = ({
         }
     };
 
-    // Static ya SPA live preview ke links mapping ke liye handler
+    // Static ya SPA live preview ke links mapping ke liye handler with active sandbox hostname resolution
     useEffect(() => {
         if (previewUrl) {
+            let baseUrl = previewUrl.replace(/\/$/, '');
+            
+            // Map localhost or 127.0.0.1 to current browser location hostname to prevent connection refusal in remote sandboxes
+            try {
+                const parsed = new URL(baseUrl);
+                if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+                    parsed.hostname = window.location.hostname;
+                }
+                baseUrl = parsed.toString().replace(/\/$/, '');
+            } catch (e) {
+                console.error("Failed to map hostname:", e);
+            }
+
             const spaFrameworks = new Set(['vite', 'nextjs', 'react', 'remix', 'nodejs']);
             if (spaFrameworks.has(framework || '') || projectType !== 'static') {
-                setFinalUrl(previewUrl.replace(/\/$/, ''));
-                console.log("🌐 MainEditor: Dev/SPA project - Final URL:", previewUrl);
+                // If a React component is active inside src/components/, load it in isolated preview mode
+                if (activeFile && (activeFile.endsWith('.jsx') || activeFile.endsWith('.tsx') || activeFile.endsWith('.js')) && activeFile.includes('src/components/')) {
+                    const parts = activeFile.split('/');
+                    const fileName = parts[parts.length - 1];
+                    const compName = fileName.replace(/\.(jsx|tsx|js)$/, '');
+                    setFinalUrl(`${baseUrl}?preview=${compName}`);
+                    console.log(`🌐 MainEditor: Rendering Component in isolation: ${compName} - Final URL:`, `${baseUrl}?preview=${compName}`);
+                } else {
+                    setFinalUrl(baseUrl);
+                    console.log("🌐 MainEditor: Dev/SPA project - Final URL:", baseUrl);
+                }
             } else {
                 const entry = (activeFile && activeFile.endsWith('.html')) ? activeFile : 'index.html';
-                const newUrl = `${previewUrl.replace(/\/$/, '')}/${entry}`;
+                const newUrl = `${baseUrl}/${entry}`;
                 setFinalUrl(newUrl);
                 console.log("📄 MainEditor: Static project - Final URL:", newUrl);
             }
@@ -455,6 +481,12 @@ export const MainEditor: React.FC<MainEditorProps> = ({
                                 fileTree={fileTree}
                                 onSelect={handleFileSelect}
                                 onCreateFile={handleCreateFile}
+                                createFolder={createFolder}
+                                renameNode={renameNode}
+                                deleteNode={deleteNode}
+                                moveNode={moveNode}
+                                copyNode={copyNode}
+                                toggleFolder={toggleFolder}
                             />
                         </div>
                     </aside>
