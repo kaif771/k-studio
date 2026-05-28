@@ -306,7 +306,7 @@ app.post('/api/cache-codebase', async (req, res) => {
         // Dynamic checking to prevent named ESM import crash if Vercel is using an older package
         if (typeof genAIModule.GoogleGenAICacheManager !== 'undefined') {
             try {
-                const model = "models/gemini-1.5-flash";
+                const model = "models/gemini-2.0-flash";
                 const cacheManager = new genAIModule.GoogleGenAICacheManager(process.env.GEMINI_API_KEY);
                 const cache = await cacheManager.create({
                     model,
@@ -448,7 +448,7 @@ app.post('/api/generate-mongo-schema', async (req, res) => {
     }
 
     try {
-        const modelInstance = genAI.getGenerativeModel({ model: 'models/gemini-1.5-flash' });
+        const modelInstance = genAI.getGenerativeModel({ model: 'models/gemini-2.0-flash' });
         const promptParts = [{
             text: `Please produce a MongoDB schema (collections, example documents, and recommended indexes) based on the following project context. Reply in Markdown format.\n\nCONTEXT:\n${projectContext || '(no project context provided)'}`
         }];
@@ -477,7 +477,7 @@ app.post('/api/generate-auth', async (req, res) => {
         return res.json({ auth, fallback: true });
     }
     try {
-        const model = genAI.getGenerativeModel({ model: 'models/gemini-1.5-flash' });
+        const model = genAI.getGenerativeModel({ model: 'models/gemini-2.0-flash' });
         const promptParts = [{
             text: `Please produce a concise authentication scaffold for a Node.js + Express application using MongoDB for user storage and JWT for sessions. Include example routes, data model, and a brief explanation. Reply with code snippets and minimal text. Context:\n\n${projectContext || '(no project context provided)'}`
         }];
@@ -507,7 +507,7 @@ app.post('/api/ai/schema-builder', async (req, res) => {
         const finalFileName = fileName.endsWith('.js') ? fileName : `${fileName}.js`;
         let generatedCode = '';
 
-        const targetModel = selectedModel ? `models/${selectedModel.replace(/^models\//, '')}` : 'models/gemini-1.5-flash';
+        const targetModel = selectedModel ? `models/${selectedModel.replace(/^models\//, '')}` : 'models/gemini-2.0-flash';
 
         const fallbackTemplate = `import mongoose from 'mongoose';\n\nconst ${entityName}Schema = new mongoose.Schema({\n  name: { type: String, required: true, index: true },\n  description: { type: String, default: "${(description || '').replace(/"/g, '\\"')}" },\n  status: { type: String, default: 'active' },\n  createdAt: { type: Date, default: Date.now },\n  updatedAt: { type: Date, default: Date.now }\n}, { timestamps: true });\n\n${entityName}Schema.index({ createdAt: -1 });\nexport const ${entityName} = mongoose.model('${entityName}', ${entityName}Schema);\n`;
 
@@ -554,7 +554,7 @@ app.post('/api/ai/auth-scaffold', async (req, res) => {
         const resendKey = process.env.RESEND_API_KEY || 're_sandbox_key';
         let generatedAuthCode = '';
 
-        const targetModel = selectedModel ? `models/${selectedModel.replace(/^models\//, '')}` : 'models/gemini-1.5-flash';
+        const targetModel = selectedModel ? `models/${selectedModel.replace(/^models\//, '')}` : 'models/gemini-2.0-flash';
 
         const fallbackTemplate = `import express from 'express';\nimport bcrypt from 'bcryptjs';\nimport jwt from 'jsonwebtoken';\nimport { Resend } from 'resend';\n\nconst router = express.Router();\nconst resend = new Resend('${resendKey}');\nconst JWT_SECRET = process.env.JWT_SECRET || 'k-studio-super-secret-key';\n\nrouter.post('/signup', async (req, res) => { try { const { email, password } = req.body; if (!email || !password) return res.status(400).json({ error: 'Required fields missing' }); const salt = await bcrypt.genSalt(10); const hashedPassword = await bcrypt.hash(password, salt); res.status(201).json({ success: true }); } catch (err) { res.status(500).json({ error: err.message }); } });\nexport default router;`;
 
