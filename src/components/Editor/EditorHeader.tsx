@@ -18,7 +18,7 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
     isAISidebarOpen,
     onToggleAISidebar
 }) => (
-    <header className="mx-6 mt-6 h-12 bg-white/20 backdrop-blur-3xl border border-white/30 rounded-2xl shadow-[0_12px_40px_rgba(31,38,135,0.04)] px-6 flex items-center justify-between shrink-0 z-50 select-none relative">
+    <header className="mx-2 mt-2 sm:mx-6 sm:mt-6 h-12 bg-white/20 backdrop-blur-3xl border border-white/30 rounded-2xl shadow-[0_12px_40px_rgba(31,38,135,0.04)] px-3 sm:px-6 flex items-center justify-between shrink-0 z-50 select-none relative">
         <div className="flex items-center gap-4">
             <button
                 onClick={onBack}

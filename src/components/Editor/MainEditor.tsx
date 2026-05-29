@@ -468,7 +468,7 @@ export const MainEditor: React.FC<MainEditorProps> = ({
 
                 {/* 2. Collapsible Workspace Sidebar (Explorer) */}
                 {isFileExplorerOpen && (
-                    <aside className="w-[260px] md:w-[280px] bg-white/40 backdrop-blur-3xl border-r border-white/50 flex flex-col shrink-0 min-h-0 overflow-hidden relative shadow-lg">
+                    <aside className="w-[260px] md:w-[280px] bg-white/40 backdrop-blur-3xl border-r border-white/50 flex flex-col shrink-0 min-h-0 overflow-hidden absolute sm:relative left-12 sm:left-0 top-0 bottom-0 h-full z-20 shadow-lg">
                         <div className="px-4 py-3 flex items-center justify-between border-b border-white/20 select-none shrink-0">
                             <span className="text-[10px] font-bold font-mono tracking-widest text-[#1D1D1F]/70 uppercase">
                                 EXPLORER: {selectedProject.toUpperCase()}
@@ -544,7 +544,7 @@ export const MainEditor: React.FC<MainEditorProps> = ({
 
                 {/* 4. Collapsible Right AI Intelligence Sidebar */}
                 {isAISidebarOpen && (
-                    <aside className="w-[340px] md:w-[380px] bg-white/40 backdrop-blur-3xl border-l border-white/50 flex flex-col shrink-0 min-h-0 h-full overflow-hidden relative shadow-lg">
+                    <aside className="w-[300px] sm:w-[340px] md:w-[380px] bg-white/40 backdrop-blur-3xl border-l border-white/50 flex flex-col shrink-0 min-h-0 h-full overflow-hidden absolute sm:relative right-0 top-0 bottom-0 z-20 shadow-lg">
                         <div className="px-4 py-3 flex items-center justify-between border-b border-white/20 select-none shrink-0">
                             <span className="text-[10px] font-bold font-mono tracking-widest text-[#1D1D1F]/70 uppercase">
                                 AI AGENT ACTION STACK
