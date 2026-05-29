@@ -5,6 +5,50 @@ import { MainEditor } from './components/Editor/MainEditor';
 // Dynamic glob mapping to load newly injected components at runtime cleanly
 const globComponents = import.meta.glob('./components/**/*.{js,jsx,ts,tsx}');
 
+// Custom ErrorBoundary to intercept rendering/compilation crashes and show a glassmorphic fallback
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("AppErrorBoundary caught crash:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError && this.state.error) {
+      return (
+        <div className="w-screen h-screen bg-slate-950/90 backdrop-blur-md flex flex-col justify-center items-center gap-4 text-center font-mono text-[#1D1D1F] select-none p-6 relative overflow-hidden">
+          <div className="absolute top-[-10%] left-[-5%] w-[45vh] h-[45vh] bg-gradient-to-br from-[#FFECD2] to-[#FCB69F] opacity-20 filter blur-[60px] rounded-full pointer-events-none" />
+          <div className="absolute bottom-[-10%] right-[5%] w-[50vh] h-[50vh] bg-gradient-to-bl from-[#FF0844] to-[#FFB199] opacity-15 filter blur-[60px] rounded-full pointer-events-none" />
+          
+          <div className="w-16 h-16 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center mb-4 shadow-xl backdrop-blur-xl animate-pulse">
+            <span className="text-3xl">⚙️</span>
+          </div>
+          
+          <h3 className="text-white text-sm font-bold tracking-widest uppercase animate-pulse">Compiling Vector Engine...</h3>
+          <p className="text-[10px] text-slate-400 max-w-sm leading-relaxed mt-2">
+            Self-healing compiler is binding import paths. Standby while matrix registers component injections.
+          </p>
+          <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-left max-w-md w-full">
+            <p className="text-[10px] text-red-400 font-bold uppercase mb-1">Diagnostic Log:</p>
+            <p className="text-[9px] text-red-300/80 break-words leading-relaxed font-sans">{this.state.error.message || String(this.state.error)}</p>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function GeminiArchitect() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [directoryHandle, setDirectoryHandle] = useState<FileSystemDirectoryHandle | null>(null);
@@ -58,14 +102,16 @@ export default function GeminiArchitect() {
     setDirectoryHandle(null);
   };
 
-  // Render isolated component preview mode
+  // Render isolated component preview mode inside safe ErrorBoundary
   if (PreviewComponent) {
     return (
-      <div className="w-screen h-screen overflow-auto bg-slate-900 flex justify-center items-center p-4">
-        <React.Suspense fallback={<div className="text-white font-mono text-xs tracking-wider animate-pulse uppercase">Compiling component...</div>}>
-          <PreviewComponent />
-        </React.Suspense>
-      </div>
+      <AppErrorBoundary>
+        <div className="w-screen h-screen overflow-auto bg-slate-900 flex justify-center items-center p-4">
+          <React.Suspense fallback={<div className="text-white font-mono text-xs tracking-wider animate-pulse uppercase">Compiling component...</div>}>
+            <PreviewComponent />
+          </React.Suspense>
+        </div>
+      </AppErrorBoundary>
     );
   }
 

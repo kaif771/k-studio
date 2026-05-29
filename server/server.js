@@ -359,7 +359,7 @@ app.post('/api/chat', async (req, res) => {
     try {
         if (!genAI) return res.status(503).json({ error: 'Generative AI SDK not initialized' });
         
-        const { message, history, projectContext, model: requestedModel, cacheName } = req.body;
+        const { message, history, projectContext, model: requestedModel, cacheName, isCursorMode } = req.body;
 
         // ✅ UPDATED SAFE MODEL STRINGS (Bypasses 404 errors and handles rate/quota 429 errors via deep fallbacks)
         const modelFallbackStack = [
@@ -380,11 +380,38 @@ CRITICAL PROTOCOLS:
 2. Write clean, modular, production-grade code that is highly optimized and responsive.
 3. You MUST always explicitly label code blocks with the exact target file path in the markdown header format:
    ### path/to/file.ext
-   followed by a valid code block, so the client-side editor parser can capture it and apply drafts safely.`;
+   followed by a valid code block, so the client-side editor parser can capture it and apply drafts safely.
+4. QUOTA GUARD (ONE-SHOT CURSOR MODE): When a user requests a comprehensive feature, component, or full website (e.g. "make a full e-commerce website"), do NOT write placeholders, abstract designs, or prompt the user for subsequent steps. You must proactively generate the complete, production-grade source code for ALL required files and styling contexts in a single turn. Pack them all into separate labeled file blocks so the user can review and apply the entire suite at once. This minimizes conversational turns and maximizes API key quota efficiency.`;
+
+        let activeSystemInstruction = baseSystemInstruction;
+        
+        // Auto-detect high-level broad app request or explicit isCursorMode toggle
+        const isOneShotFullApp = isCursorMode || (message && /make a full|build a full|create a full|full website|ecommerce|e-commerce|complete app|entire app|full-stack/i.test(message));
+        
+        if (isOneShotFullApp) {
+            activeSystemInstruction += `
+
+🔥 [CRITICAL WORKFLOW - ONE-SHOT FULL ARCHITECTURE GENERATION DIRECTIVE]:
+The user wants to generate a complete, premium, production-ready full application/website in a single turn to conserve their API quota.
+You MUST output all necessary files to form a fully operational app.
+For example, if it's an e-commerce website, you must generate:
+1. 'src/components/EcommerceNavbar.jsx' - Fully featured responsive navigation navbar with logo and links.
+2. 'src/components/EcommerceHero.jsx' - Modern animated hero landing panel.
+3. 'src/components/EcommerceProducts.jsx' - Product grid with active search, filter by categories, sorting, and 'Add to Cart' trigger events.
+4. 'src/components/EcommerceCart.jsx' - Slide-out shopping cart drawer showing items, quantity handlers, cart subtotals, and 'Checkout' trigger.
+5. 'src/components/EcommerceCheckout.jsx' - Interactive checkout form with details and purchase completion layout.
+6. 'src/components/EcommerceDashboard.jsx' - Minimal elegant analytics metrics screen showing chart outlines and sales metrics.
+7. 'src/App.tsx' - Main root container with custom view router state that seamlessly integrates the navigation navbar, pages, layout blocks, and global shopping cart state together!
+
+PROMPTS FOR THIS DIRECTIVE:
+- DO NOT truncate files. DO NOT write placeholder comments like '// ... rest of code'. Write every file completely in clean, functional state!
+- Mark every code block header explicitly: '### path/to/filename.ext' so the client parses them instantly.
+- Make the design feel premium, using glowing neon highlights, curated harmonious colors (deep slate, dark charcoal, and subtle indigo borders), Outfit/Inter typography, and smooth transitions.`;
+        }
 
         const fullSystemInstruction = projectContext
-            ? `${baseSystemInstruction}\n\n[WORKSPACE ARCHITECTURE & PROJECT CONTEXT]:\n${projectContext}`
-            : baseSystemInstruction;
+            ? `${activeSystemInstruction}\n\n[WORKSPACE ARCHITECTURE & PROJECT CONTEXT]:\n${projectContext}`
+            : activeSystemInstruction;
 
         let replyText = null;
         let isExecuted = false;
@@ -730,6 +757,265 @@ app.post('/api/fs/move', async (req, res) => {
     } catch (error) {
         console.error('❌ /api/fs/move failed:', error);
         return res.status(500).json({ error: 'Move failed', details: error.message });
+    }
+});
+
+app.post('/api/fs/write-component', async (req, res) => {
+    try {
+        const { path: targetPath, code, projectName } = req.body || {};
+        if (!targetPath || typeof targetPath !== 'string' || typeof code !== 'string') {
+            return res.status(400).json({ error: 'path and code are required and must be strings' });
+        }
+        
+        const projectPath = projectName ? resolveProjectDirectory(projectName) : workspaceRoot;
+        const safePath = normalizeWorkspaceTarget(targetPath, projectPath);
+        
+        // 1. Write the component file itself to src/components/...
+        await fs.promises.mkdir(path.dirname(safePath), { recursive: true });
+        await fs.promises.writeFile(safePath, code, 'utf8');
+        console.log(`📁 Sandbox: Written component file to: ${safePath}`);
+        
+        // 2. Instantiate sandbox-runtime/ directory if it doesn't exist
+        const sandboxDir = path.join(projectPath, 'sandbox-runtime');
+        await fs.promises.mkdir(sandboxDir, { recursive: true });
+        
+        // 3. Write sandbox-runtime/main.tsx
+        const mainTsxPath = path.join(sandboxDir, 'main.tsx');
+        const mainTsxContent = `import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from '../src/App';
+import '../src/index.css';
+
+// Custom ErrorBoundary to intercept dynamic rendering/compilation crashes gracefully
+class SandboxErrorBoundary extends React.Component<
+    { children: React.ReactNode; fallback: (error: Error) => React.ReactNode },
+    { hasError: boolean; error: Error | null }
+> {
+    constructor(props: any) {
+        super(props);
+        this.state = { hasError: false, error: null };
+    }
+
+    static getDerivedStateFromError(error: Error) {
+        return { hasError: true, error };
+    }
+
+    componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+        console.error("Sandbox ErrorBoundary caught crash:", error, errorInfo);
+    }
+
+    render() {
+        if (this.state.hasError && this.state.error) {
+            return this.props.fallback(this.state.error);
+        }
+        return this.props.children;
+    }
+}
+
+const GlassmorphicFallback = ({ error }: { error: Error }) => (
+    <div className="w-screen h-screen bg-slate-950/90 backdrop-blur-md flex flex-col justify-center items-center gap-4 text-center font-mono text-[#1D1D1F] select-none p-6 relative overflow-hidden">
+        <div className="absolute top-[-10%] left-[-5%] w-[45vh] h-[45vh] bg-gradient-to-br from-[#FFECD2] to-[#FCB69F] opacity-20 filter blur-[60px] rounded-full pointer-events-none" />
+        <div className="absolute bottom-[-10%] right-[5%] w-[50vh] h-[50vh] bg-gradient-to-bl from-[#FF0844] to-[#FFB199] opacity-15 filter blur-[60px] rounded-full pointer-events-none" />
+        
+        <div className="w-16 h-16 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center mb-4 shadow-xl backdrop-blur-xl animate-pulse">
+            <span className="text-3xl">⚙️</span>
+        </div>
+        
+        <h3 className="text-white text-sm font-bold tracking-widest uppercase animate-pulse">Compiling Vector Engine...</h3>
+        <p className="text-[10px] text-slate-400 max-w-sm leading-relaxed mt-2">
+            Self-healing compiler is binding import paths. Standby while matrix registers component injections.
+        </p>
+        <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-left max-w-md w-full">
+            <p className="text-[10px] text-red-400 font-bold uppercase mb-1">Diagnostic Log:</p>
+            <p className="text-[9px] text-red-300/80 break-words leading-relaxed font-sans">{error.message || String(error)}</p>
+        </div>
+    </div>
+);
+
+// Dynamic glob mapping loader for dynamic SPA preview on port 5100
+const SandboxContainer = () => {
+    const [Component, setComponent] = React.useState<React.ComponentType | null>(null);
+    const [error, setError] = React.useState<string | null>(null);
+
+    React.useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const compName = params.get('preview');
+        
+        if (!compName) {
+            setError("No component targeted in the preview query selector.");
+            return;
+        }
+
+        const modules = import.meta.glob('../src/components/**/*.{js,jsx,ts,tsx}');
+        let foundPath = '';
+        for (const path in modules) {
+            if (path.endsWith('/' + compName + '.jsx') || path.endsWith('/' + compName + '.tsx') || path.endsWith('/' + compName + '.js')) {
+                foundPath = path;
+                break;
+            }
+        }
+
+        if (foundPath) {
+            modules[foundPath]()
+                .then((mod: any) => {
+                    const Comp = mod.default || mod[compName];
+                    if (Comp) {
+                        setComponent(() => Comp);
+                    } else {
+                        setError("Component " + compName + " has no default or matching named export.");
+                    }
+                })
+                .catch((err) => {
+                    setError(err.message || String(err));
+                });
+        } else {
+            setError("Component " + compName + " not found inside src/components/ directory tree.");
+        }
+    }, []);
+
+    if (error) {
+        return (
+            <div className="w-screen h-screen bg-slate-950 flex flex-col justify-center items-center gap-4 text-center p-8 select-none font-mono">
+                <span className="text-4xl animate-pulse">⚠️</span>
+                <h3 className="text-red-500 text-xs font-bold tracking-widest uppercase">Preview Compiler Mismatch</h3>
+                <p className="text-[10px] text-slate-400 max-w-xs leading-relaxed">{error}</p>
+            </div>
+        );
+    }
+
+    if (!Component) {
+        return (
+            <div className="w-screen h-screen bg-slate-900 flex flex-col justify-center items-center gap-4 font-mono">
+                <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                <div className="text-indigo-400 text-xs tracking-widest uppercase animate-pulse">Compiling Vector Engine...</div>
+            </div>
+        );
+    }
+
+    return (
+        <SandboxErrorBoundary fallback={(err) => <GlassmorphicFallback error={err} />}>
+            <div className="w-screen h-screen overflow-auto bg-slate-900 flex justify-center items-center">
+                <React.Suspense fallback={<div className="text-white font-mono text-xs animate-pulse">Compiling component...</div>}>
+                    <Component />
+                </React.Suspense>
+            </div>
+        </SandboxErrorBoundary>
+    );
+};
+
+const RootComponent = () => {
+    const params = new URLSearchParams(window.location.search);
+    const isPreviewActive = params.has('preview');
+
+    if (isPreviewActive) {
+        return <SandboxContainer />;
+    }
+    return <App />;
+};
+
+const container = document.getElementById('root');
+if (container) {
+    createRoot(container).render(<RootComponent />);
+}
+`;
+        await fs.promises.writeFile(mainTsxPath, mainTsxContent, 'utf8');
+        console.log(`📁 Sandbox: Instantiated sandbox-runtime/main.tsx`);
+
+        // 4. Automatically rewrite workspace root index.html to act as the single-page entry targeting the sandbox module
+        const indexHtmlPath = path.join(projectPath, 'index.html');
+        if (fs.existsSync(indexHtmlPath)) {
+            let indexHtml = await fs.promises.readFile(indexHtmlPath, 'utf8');
+            if (indexHtml.includes('/src/main.tsx')) {
+                indexHtml = indexHtml.replace('/src/main.tsx', '/sandbox-runtime/main.tsx');
+                await fs.promises.writeFile(indexHtmlPath, indexHtml, 'utf8');
+                console.log(`📁 Sandbox: Rewrote index.html entry point to sandbox-runtime/main.tsx`);
+            }
+        }
+
+        // 5. Silent Self-Healing Background Dependency Scanner & Resolver
+        const importRegex = /import\s+(?:[\w\s,{}*]+)\s+from\s+['"]([^'"]+)['"]/g;
+        const imports = new Set();
+        let match;
+        while ((match = importRegex.exec(code)) !== null) {
+            const importPath = match[1];
+            if (!importPath.startsWith('.') && !importPath.startsWith('/')) {
+                const parts = importPath.split('/');
+                const packageName = importPath.startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0];
+                imports.add(packageName);
+            }
+        }
+
+        if (imports.size > 0) {
+            const pkgPath = path.join(projectPath, 'package.json');
+            if (fs.existsSync(pkgPath)) {
+                try {
+                    const pkg = JSON.parse(await fs.promises.readFile(pkgPath, 'utf8'));
+                    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+                    const missing = [];
+                    for (const pkgName of imports) {
+                        if (!deps[pkgName] && pkgName !== 'react' && pkgName !== 'react-dom') {
+                            missing.push(pkgName);
+                        }
+                    }
+
+                    if (missing.length > 0) {
+                        console.log(`📦 [Self-Healing] Missing packages detected: ${missing.join(', ')}`);
+                        const cmd = `npm install ${missing.join(' ')} --silent`;
+                        exec(cmd, { cwd: projectPath }, (err) => {
+                            if (err) {
+                                console.error(`❌ [Self-Healing] Background install failed:`, err.message);
+                            } else {
+                                console.log(`✅ [Self-Healing] Successfully installed: ${missing.join(', ')}`);
+                            }
+                        });
+                    }
+                } catch (pkgErr) {
+                    console.error('❌ [Self-Healing] Failed to scan package dependencies:', pkgErr);
+                }
+            }
+        }
+
+        return res.json({ success: true, sandboxMount: '/sandbox-runtime/main.tsx' });
+    } catch (error) {
+        console.error('❌ /api/fs/write-component failed:', error);
+        return res.status(500).json({ error: 'Sandbox synthesis failed', details: error.message });
+    }
+});
+
+app.post('/api/ai/refactor', async (req, res) => {
+    try {
+        if (!genAI) return res.status(503).json({ error: 'Generative AI SDK not initialized' });
+        const { code, instruction, filename } = req.body || {};
+        
+        if (!code || typeof code !== 'string' || !instruction) {
+            return res.status(400).json({ error: 'code and instruction are required' });
+        }
+
+        console.log(`🤖 [AI Refactor] Initiated refactoring lens for: "${filename || 'unnamed'}"`);
+        
+        const modelInstance = genAI.getGenerativeModel({ model: 'models/gemini-2.0-flash' });
+        const systemPrompt = `You are a Senior Systems Engineer and Code Architect. Your task is to refactor the provided code block according to the user's instructions.
+CRITICAL: You must return ONLY the modified refactored source code. Do NOT wrap it in markdown code blocks, do not explain the changes, and do not add any comments that were not requested. Return the exact, clean, compilable code.`;
+        
+        const prompt = `INSTRUCTION: ${instruction}\n\nORIGINAL CODE:\n${code}`;
+        
+        const result = await modelInstance.generateContent({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            systemInstruction: systemPrompt,
+            generationConfig: { responseMimeType: 'text/plain' }
+        });
+
+        let refactoredCode = result.response.text().trim();
+        if (refactoredCode.startsWith('```')) {
+            refactoredCode = refactoredCode.replace(/^```[a-zA-Z0-9]*\n/, '').replace(/\n```$/, '');
+        }
+        refactoredCode = refactoredCode.trim();
+        
+        console.log(`✅ [AI Refactor] Successfully refactored code layer.`);
+        return res.json({ success: true, refactoredCode });
+    } catch (error) {
+        console.error('❌ /api/ai/refactor failed:', error);
+        return res.status(500).json({ error: 'Refactor engine failed', details: error.message });
     }
 });
 

@@ -1,7 +1,8 @@
-import React from 'react';
-import MonacoEditor from '@monaco-editor/react';
-import { X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import MonacoEditor, { DiffEditor } from '@monaco-editor/react';
+import { X, Sparkles } from 'lucide-react';
 import type { Tab } from '../../hooks/useEditorState';
+
 interface CodeEditorProps {
     activeFile: string | null;
     code: string;
@@ -18,6 +19,7 @@ interface CodeEditorProps {
         smoothScrolling: boolean;
     };
 }
+
 export const CodeEditor: React.FC<CodeEditorProps> = ({
     activeFile,
     code,
@@ -27,6 +29,22 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
     onCloseTab,
     settings
 }) => {
+    // Refactor Matrix States
+    const [isRefactorOpen, setIsRefactorOpen] = useState(false);
+    const [refactorPrompt, setRefactorPrompt] = useState('');
+    const [isRefactoring, setIsRefactoring] = useState(false);
+    const [refactoredCode, setRefactoredCode] = useState<string | null>(null);
+    const [isDiffOpen, setIsDiffOpen] = useState(false);
+
+    // Reset refactor state on active tab change
+    useEffect(() => {
+        setIsRefactorOpen(false);
+        setRefactorPrompt('');
+        setIsRefactoring(false);
+        setRefactoredCode(null);
+        setIsDiffOpen(false);
+    }, [activeFile]);
+
     // Map file extension to Monaco Editor languages
     const getEditorLanguage = (fileName: string | null) => {
         if (!fileName) return 'javascript';
@@ -99,6 +117,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
                 return 'plaintext';
         }
     };
+
     const getFileIcon = (fileName: string) => {
         const ext = fileName.split('.').pop()?.toLowerCase();
         switch (ext) {
@@ -154,7 +173,13 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
                 );
         }
     };
-    const handleEditorDidMount = (_editor: any, monaco: any) => {
+
+    const handleEditorDidMount = (editor: any, monaco: any) => {
+        // Bind Ctrl+I inside Monaco Editor natively
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI, () => {
+            setIsRefactorOpen(true);
+        });
+
         monaco.editor.defineTheme('k-studio-light', {
             base: 'vs',
             inherit: true,
@@ -165,7 +190,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
                 { token: 'number', foreground: 'D97706' },
             ],
             colors: {
-                'editor.background': '#FFFFFFCD', // High translucency glass matching the main application wrapper
+                'editor.background': '#FFFFFFCD',
                 'editor.lineHighlightBackground': '#F3F4F640',
                 'editorLineNumber.foreground': '#86868B60',
                 'editorLineNumber.activeForeground': '#4F46E5',
@@ -176,12 +201,62 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
         });
         monaco.editor.setTheme('k-studio-light');
     };
+
+    const handleRefactorSubmit = async () => {
+        if (!refactorPrompt.trim() || isRefactoring) return;
+        setIsRefactoring(true);
+
+        try {
+            const response = await fetch('/api/ai/refactor', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    code,
+                    instruction: refactorPrompt,
+                    filename: activeFile
+                })
+            });
+
+            if (!response.ok) throw new Error("Refactor network payload rejected");
+            const data = await response.json();
+
+            if (data.success && data.refactoredCode) {
+                setRefactoredCode(data.refactoredCode);
+                setIsDiffOpen(true);
+                setIsRefactorOpen(false);
+            } else {
+                alert("Matrix AI completed with zero structural recommendations.");
+            }
+        } catch (error: any) {
+            console.error("❌ Refactor failed:", error);
+            alert("Refactor Engine Failure: " + (error?.message || "Internal handshake error"));
+        } finally {
+            setIsRefactoring(false);
+        }
+    };
+
+    const handleAcceptDiff = () => {
+        if (refactoredCode) {
+            setCode(refactoredCode);
+        }
+        setIsDiffOpen(false);
+        setRefactoredCode(null);
+        setRefactorPrompt('');
+    };
+
+    const handleDiscardDiff = () => {
+        setIsDiffOpen(false);
+        setRefactoredCode(null);
+        setRefactorPrompt('');
+    };
+
     const language = getEditorLanguage(activeFile);
+
     if (openTabs.length === 0 || !activeFile) {
         return (
             <section className="flex-1 flex flex-col h-full min-h-0 overflow-hidden font-sans justify-center items-center p-8 bg-white/25 backdrop-blur-xl border border-white/50 rounded-2xl shadow-lg">
                 <div className="text-center max-w-md flex flex-col items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-white/60 border border-white/70 shadow-md flex items-center justify-center text-blue-600 animate-pulse">
+                    <div className="w-12 h-12 rounded-2xl bg-white/60 border border-white/70 shadow-md flex items-center justify-center text-indigo-600 animate-pulse">
                         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                         </svg>
@@ -204,8 +279,9 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
             </section>
         );
     }
+
     return (
-        <section className="flex-1 flex flex-col h-full min-h-0 overflow-hidden font-sans">
+        <section className="flex-1 flex flex-col h-full min-h-0 overflow-hidden font-sans relative">
             {/* Scrollable IDE Tab Row */}
             <div 
                 className="flex items-center bg-white/20 backdrop-blur-md border border-white/40 rounded-t-xl h-10 w-full shrink-0 select-none overflow-x-auto overflow-y-hidden border-b-0"
@@ -219,7 +295,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
                             onClick={() => onSelectTab(tab.fileName, tab.handle)}
                             className={`group relative flex items-center gap-2 px-4 h-full border-r border-white/20 cursor-pointer select-none transition-all duration-150 min-w-[120px] max-w-[200px] shrink-0 ${
                                 isActive
-                                    ? 'bg-white/85 text-[#1D1D1F] font-semibold border-b-2 border-b-blue-600'
+                                    ? 'bg-white/85 text-[#1D1D1F] font-semibold border-b-2 border-b-indigo-600'
                                     : 'text-[#1D1D1F]/60 hover:bg-white/40 hover:text-[#1D1D1F]'
                             }`}
                         >
@@ -233,9 +309,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
                             <div className="flex items-center justify-center w-4 h-4 shrink-0">
                                 {tab.isDirty ? (
                                     <>
-                                        {/* Blue circle dot when dirty, hidden on hover */}
-                                        <span className="w-2 h-2 bg-blue-500 rounded-full block group-hover:hidden animate-pulse" />
-                                        {/* Close icon shown on hover */}
+                                        <span className="w-2 h-2 bg-indigo-500 rounded-full block group-hover:hidden animate-pulse" />
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
@@ -262,38 +336,145 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
                     );
                 })}
             </div>
+
             {/* Solid Premium Off-White Paper Layout Sheet */}
-            <div className="flex-1 bg-white/95 p-3 rounded-b-xl border border-white/40 shadow-sm h-full min-h-0 overflow-hidden">
-                <MonacoEditor
-                    height="100%"
-                    language={language}
-                    value={code}
-                    onChange={(val) => setCode(val || '')}
-                    onMount={handleEditorDidMount}
-                    theme="vs-light"
-                    options={{
-                        fontSize: settings?.fontSize || 13,
-                        fontFamily: settings?.fontFamily || 'JetBrains Mono, SF Mono, monospace',
-                        tabSize: settings?.tabSize || 4,
-                        lineNumbers: settings?.lineNumbers || 'on',
-                        cursorBlinking: settings?.cursorBlinking || 'smooth',
-                        smoothScrolling: settings?.smoothScrolling !== undefined ? settings.smoothScrolling : true,
-                        minimap: { enabled: false },
-                        wordWrap: 'on',
-                        automaticLayout: true,
-                        padding: { top: 16, bottom: 16 },
-                        lineNumbersMinChars: 3,
-                        glyphMargin: false,
-                        folding: true,
-                        scrollbar: {
-                            vertical: 'auto',
-                            horizontal: 'auto',
-                            useShadows: false,
-                            verticalScrollbarSize: 10,
-                            horizontalScrollbarSize: 10
-                        }
-                    }}
-                />
+            <div className="flex-1 bg-white/95 p-3 rounded-b-xl border border-white/40 shadow-sm h-full min-h-0 overflow-hidden relative">
+                {isDiffOpen && refactoredCode ? (
+                    <DiffEditor
+                        height="100%"
+                        language={language}
+                        original={code}
+                        modified={refactoredCode}
+                        theme="vs-light"
+                        options={{
+                            renderSideBySide: true,
+                            readOnly: false,
+                            originalEditable: false,
+                            fontSize: settings?.fontSize || 13,
+                            fontFamily: settings?.fontFamily || 'JetBrains Mono, SF Mono, monospace',
+                            minimap: { enabled: false },
+                            scrollbar: {
+                                vertical: 'auto',
+                                horizontal: 'auto',
+                                verticalScrollbarSize: 10,
+                                horizontalScrollbarSize: 10
+                            }
+                        }}
+                    />
+                ) : (
+                    <MonacoEditor
+                        height="100%"
+                        language={language}
+                        value={code}
+                        onChange={(val) => setCode(val || '')}
+                        onMount={handleEditorDidMount}
+                        theme="vs-light"
+                        options={{
+                            fontSize: settings?.fontSize || 13,
+                            fontFamily: settings?.fontFamily || 'JetBrains Mono, SF Mono, monospace',
+                            tabSize: settings?.tabSize || 4,
+                            lineNumbers: settings?.lineNumbers || 'on',
+                            cursorBlinking: settings?.cursorBlinking || 'smooth',
+                            smoothScrolling: settings?.smoothScrolling !== undefined ? settings.smoothScrolling : true,
+                            minimap: { enabled: false },
+                            wordWrap: 'on',
+                            automaticLayout: true,
+                            padding: { top: 16, bottom: 16 },
+                            lineNumbersMinChars: 3,
+                            glyphMargin: false,
+                            folding: true,
+                            scrollbar: {
+                                vertical: 'auto',
+                                horizontal: 'auto',
+                                useShadows: false,
+                                verticalScrollbarSize: 10,
+                                horizontalScrollbarSize: 10
+                            }
+                        }}
+                    />
+                )}
+
+                {/* Floating "Refactor AI" button overlay */}
+                {!isDiffOpen && (
+                    <button 
+                        onClick={() => setIsRefactorOpen(true)}
+                        className="absolute bottom-6 right-8 z-40 flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-mono text-[9.5px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-indigo-600/20 active:scale-95 transition-all cursor-pointer"
+                    >
+                        <Sparkles size={11} className="animate-pulse" />
+                        <span>Inline Refactor (Ctrl+I)</span>
+                    </button>
+                )}
+
+                {/* Floating Apple-Style Glassmorphic AI Prompt Overlay */}
+                {isRefactorOpen && (
+                    <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-md bg-white/80 backdrop-blur-xl border border-neutral-200/80 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.12)] p-4 animate-in slide-in-from-top duration-300">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-[9.5px] font-black font-mono tracking-widest text-neutral-400 uppercase flex items-center gap-1.5">
+                                <Sparkles size={10.5} className="text-indigo-600 animate-spin" />
+                                Matrix AI Refactor Lens
+                            </span>
+                            <button 
+                                onClick={() => {
+                                    setIsRefactorOpen(false);
+                                    setRefactorPrompt('');
+                                }}
+                                className="text-neutral-400 hover:text-neutral-900 text-xs font-bold transition-colors cursor-pointer"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        
+                        <div className="relative flex items-center bg-neutral-50/50 border border-neutral-200 rounded-xl px-3 py-2.5 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500/20 transition-all">
+                            <input 
+                                type="text"
+                                value={refactorPrompt}
+                                onChange={(e) => setRefactorPrompt(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleRefactorSubmit();
+                                    if (e.key === 'Escape') {
+                                        setIsRefactorOpen(false);
+                                        setRefactorPrompt('');
+                                    }
+                                }}
+                                placeholder="Enter refactor instructions (e.g., optimize imports)..."
+                                className="w-full bg-transparent border-none outline-none text-[12px] text-neutral-900 placeholder-neutral-400 font-medium"
+                                disabled={isRefactoring}
+                                autoFocus
+                            />
+                            
+                            <button 
+                                onClick={handleRefactorSubmit}
+                                disabled={!refactorPrompt.trim() || isRefactoring}
+                                className="ml-2 px-3.5 py-2 bg-[#1D1D1F] hover:bg-indigo-600 text-white rounded-lg text-[9.5px] font-black uppercase tracking-wider transition-all disabled:opacity-30 cursor-pointer shrink-0"
+                            >
+                                {isRefactoring ? 'Thinking...' : 'Apply'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Floating Diff Review Bar */}
+                {isDiffOpen && (
+                    <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3.5 px-5 py-3 bg-white/90 backdrop-blur-xl border border-neutral-200/80 rounded-2xl shadow-xl animate-in slide-in-from-top duration-300">
+                        <span className="text-[9.5px] font-black font-mono tracking-widest text-[#1D1D1F] uppercase flex items-center gap-1.5 shrink-0">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                            Diff Review Lens
+                        </span>
+                        <div className="h-4 w-[1px] bg-neutral-200" />
+                        <button 
+                            onClick={handleAcceptDiff}
+                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-[9px] font-black uppercase tracking-wider rounded-lg shadow-sm active:scale-95 transition-all cursor-pointer flex items-center gap-1"
+                        >
+                            Accept Changes
+                        </button>
+                        <button 
+                            onClick={handleDiscardDiff}
+                            className="px-3.5 py-1.5 bg-neutral-200 hover:bg-neutral-300 text-neutral-800 font-mono text-[9px] font-black uppercase tracking-wider rounded-lg shadow-sm active:scale-95 transition-all cursor-pointer"
+                        >
+                            Discard
+                        </button>
+                    </div>
+                )}
             </div>
         </section>
     );

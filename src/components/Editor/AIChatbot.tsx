@@ -35,6 +35,7 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
     const [input, setInput] = useState('');
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
     const [isSending, setIsSending] = useState(false);
+    const [isCursorMode, setIsCursorMode] = useState(true); // Default to One-Shot Cursor mode to save user quota
     const fileInputRef = useRef<HTMLInputElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -91,16 +92,23 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
                     parts: [{ text: m.content }]
                 }));
 
+            // Direct custom prompt injection for complete full-app generation
+            let finalMessageText = currentInput;
+            if (isCursorMode) {
+                finalMessageText = `${currentInput}\n\n[DIRECTIVE: ONE-SHOT CURSOR MODE ACTIVE. Please proactively generate all required files completely in single-turn blocks with no placeholders to save my API key quota.]`;
+            }
+
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    message: currentInput,
+                    message: finalMessageText,
                     image: currentImage,
                     history: historyToSend,
                     cacheName,
                     projectContext: projectContext, 
-                    model: selectedModel 
+                    model: selectedModel,
+                    isCursorMode: isCursorMode
                 }),
             });
 
@@ -282,6 +290,25 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
                         </div>
                     )}
 
+                    {/* Glowing Premium One-Shot Cursor Mode Switch */}
+                    <div className="flex items-center justify-between px-3 py-2 bg-indigo-50/20 border border-indigo-100/50 rounded-xl transition-all duration-300">
+                        <div 
+                            className="flex items-center gap-2 cursor-pointer select-none" 
+                            onClick={() => setIsCursorMode(!isCursorMode)}
+                        >
+                            <div className={`relative w-8 h-4 rounded-full transition-colors duration-300 shrink-0 ${isCursorMode ? 'bg-indigo-600' : 'bg-neutral-300'}`}>
+                                <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform duration-300 ${isCursorMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                            </div>
+                            <span className="text-[10px] font-black font-mono tracking-wide text-neutral-700 flex items-center gap-1">
+                                {isCursorMode ? '🚀 CURSOR ONE-SHOT ACTIVE' : '⚡ FAST CHAT MODE'}
+                                {isCursorMode && <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />}
+                            </span>
+                        </div>
+                        <span className="text-[8px] font-mono font-black uppercase text-indigo-700 bg-indigo-100/75 px-2 py-0.5 rounded-md tracking-wider">
+                            Saves API Quotas
+                        </span>
+                    </div>
+
                     <div className="relative flex items-center bg-white border border-neutral-200 rounded-xl px-3 py-3 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500/20 transition-all">
                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect} />
                         <button 
@@ -418,6 +445,25 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({
                             </button>
                         </div>
                     )}
+
+                    {/* Glowing Premium One-Shot Cursor Mode Switch */}
+                    <div className="flex items-center justify-between px-3 py-2 bg-indigo-50/20 border border-indigo-100/50 rounded-xl transition-all duration-300">
+                        <div 
+                            className="flex items-center gap-2 cursor-pointer select-none" 
+                            onClick={() => setIsCursorMode(!isCursorMode)}
+                        >
+                            <div className={`relative w-8 h-4 rounded-full transition-colors duration-300 shrink-0 ${isCursorMode ? 'bg-indigo-600' : 'bg-neutral-300'}`}>
+                                <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform duration-300 ${isCursorMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                            </div>
+                            <span className="text-[10px] font-black font-mono tracking-wide text-neutral-700 flex items-center gap-1">
+                                {isCursorMode ? '🚀 CURSOR ONE-SHOT ACTIVE' : '⚡ FAST CHAT MODE'}
+                                {isCursorMode && <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />}
+                            </span>
+                        </div>
+                        <span className="text-[8px] font-mono font-black uppercase text-indigo-700 bg-indigo-100/75 px-2 py-0.5 rounded-md tracking-wider">
+                            Saves API Quotas
+                        </span>
+                    </div>
 
                     <div className="relative flex items-center bg-white border border-neutral-200 rounded-xl px-3 py-3 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500/20 transition-all">
                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect} />
