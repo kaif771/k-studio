@@ -398,16 +398,17 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
                 {!isDiffOpen && (
                     <button 
                         onClick={() => setIsRefactorOpen(true)}
-                        className="absolute bottom-6 right-8 z-40 flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-mono text-[9.5px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-indigo-600/20 active:scale-95 transition-all cursor-pointer"
+                        className="absolute bottom-6 right-8 z-40 flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-mono text-[9px] sm:text-[9.5px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-indigo-600/20 active:scale-95 transition-all cursor-pointer"
                     >
                         <Sparkles size={11} className="animate-pulse" />
-                        <span>Inline Refactor (Ctrl+I)</span>
+                        <span className="hidden xs:inline">Inline Refactor (Ctrl+I)</span>
+                        <span className="xs:hidden">Refactor</span>
                     </button>
                 )}
 
                 {/* Floating Apple-Style Glassmorphic AI Prompt Overlay */}
                 {isRefactorOpen && (
-                    <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-md bg-white/80 backdrop-blur-xl border border-neutral-200/80 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.12)] p-4 animate-in slide-in-from-top duration-300">
+                    <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 w-[92%] sm:w-full sm:max-w-md bg-white/80 backdrop-blur-xl border border-neutral-200/80 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.12)] p-3 sm:p-4 animate-in slide-in-from-top duration-300">
                         <div className="flex items-center justify-between mb-2">
                             <span className="text-[9.5px] font-black font-mono tracking-widest text-neutral-400 uppercase flex items-center gap-1.5">
                                 <Sparkles size={10.5} className="text-indigo-600 animate-spin" />
@@ -455,23 +456,26 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
 
                 {/* Floating Diff Review Bar */}
                 {isDiffOpen && (
-                    <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3.5 px-5 py-3 bg-white/90 backdrop-blur-xl border border-neutral-200/80 rounded-2xl shadow-xl animate-in slide-in-from-top duration-300">
-                        <span className="text-[9.5px] font-black font-mono tracking-widest text-[#1D1D1F] uppercase flex items-center gap-1.5 shrink-0">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                            Diff Review Lens
+                    <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 flex flex-wrap sm:flex-nowrap items-center justify-center gap-2 sm:gap-3.5 w-[92%] sm:w-auto px-4 py-2.5 sm:px-5 sm:py-3 bg-white/90 backdrop-blur-xl border border-neutral-200/80 rounded-2xl shadow-xl animate-in slide-in-from-top duration-300">
+                        <span className="text-[9px] sm:text-[9.5px] font-black font-mono tracking-widest text-[#1D1D1F] uppercase flex items-center gap-1 sm:gap-1.5 shrink-0">
+                            <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-500 animate-ping" />
+                            <span className="hidden xs:inline">Diff Review Lens</span>
+                            <span className="xs:hidden">Diff</span>
                         </span>
-                        <div className="h-4 w-[1px] bg-neutral-200" />
+                        <div className="hidden xs:block h-4 w-[1px] bg-neutral-200" />
                         <button 
                             onClick={handleAcceptDiff}
-                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-[9px] font-black uppercase tracking-wider rounded-lg shadow-sm active:scale-95 transition-all cursor-pointer flex items-center gap-1"
+                            className="px-2.5 py-1 sm:px-3.5 sm:py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-[8.5px] sm:text-[9px] font-black uppercase tracking-wider rounded-lg shadow-sm active:scale-95 transition-all cursor-pointer flex items-center gap-1"
                         >
-                            Accept Changes
+                            <span className="hidden xs:inline">Accept Changes</span>
+                            <span className="xs:hidden">Accept</span>
                         </button>
                         <button 
                             onClick={handleDiscardDiff}
-                            className="px-3.5 py-1.5 bg-neutral-200 hover:bg-neutral-300 text-neutral-800 font-mono text-[9px] font-black uppercase tracking-wider rounded-lg shadow-sm active:scale-95 transition-all cursor-pointer"
+                            className="px-2.5 py-1 sm:px-3.5 sm:py-1.5 bg-neutral-200 hover:bg-neutral-300 text-neutral-800 font-mono text-[8.5px] sm:text-[9px] font-black uppercase tracking-wider rounded-lg shadow-sm active:scale-95 transition-all cursor-pointer"
                         >
-                            Discard
+                            <span className="hidden xs:inline">Discard</span>
+                            <span className="xs:hidden">Discard</span>
                         </button>
                     </div>
                 )}

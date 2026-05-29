@@ -494,7 +494,7 @@ export const MainEditor: React.FC<MainEditorProps> = ({
 
                 {/* 3. Central Working Canvas Grid (Monaco Editor + Overlays) */}
                 <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-                    <div className="flex-1 flex flex-row gap-4 min-h-0 p-4 pb-2 relative">
+                    <div className="flex-1 flex flex-row gap-2 sm:gap-4 min-h-0 p-1.5 sm:p-4 pb-2 relative">
                         <div className="flex-1 flex flex-col min-h-0 relative">
                             <CodeEditor
                                 activeFile={activeFile}
