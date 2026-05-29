@@ -7,7 +7,7 @@ process.env.FORCE_FALLBACK = '1';
 // Ensure SDK won't be initialized in tests: clear any GEMINI API key
 process.env.GEMINI_API_KEY = '';
 
-import { app } from '../server.js';
+import { app } from '../../api/index.js';
 
 function listenOnEphemeral(app) {
     return new Promise((resolve, reject) => {

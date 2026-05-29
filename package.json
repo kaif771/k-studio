@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node --max-old-space-size=4096 node_modules/vite/bin/vite.js",
     "test": "node --max-old-space-size=4096 --test ./server/tests/generate.test.mjs",
-    "server": "nodemon --delay 2500 --exec \"node --max-old-space-size=4096\" server/server.js",
+    "server": "nodemon --delay 2500 --exec \"node --max-old-space-size=4096\" api/index.js",
     "dev:all": "concurrently \"npm run dev\" \"npm run server\"",
     "build": "tsc -b && node --max-old-space-size=4096 node_modules/vite/bin/vite.js build",
     "lint": "eslint .",
